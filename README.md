@@ -23,8 +23,12 @@ TakeOverFlow es una solución todo-en-uno para identificar vulnerabilidades de s
    go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest
    go install github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest
    ```
-Clonar repositorio:
+
+Clonar repositorio o instalar con Go:
+
 ```bash
+go install github.com/TheOffSecGirl/takeovflow@latest
+-----
 git clone https://github.com/TheOffSecGirl/takeoverflow.git
 cd takeoverflow
 # Dar permisos de ejecución:
@@ -34,15 +38,19 @@ chmod +x takeoverflow.sh
 # 🛠 Uso Básico
 
 ### Escanear un solo dominio
+
 `./takeoverflow.sh -d example.com`
 
 ### Escanear múltiples dominios desde archivo
+
 `./takeoverflow.sh -f dominios.txt`
 
 ### Escanear lista de dominios
+
 `./takeoverflow.sh -l "domain1.com,domain2.com"`
 
 ### Personalizar threads y rate limit
+
 `./takeoverflow.sh -d example.com -t 100 -r 5`
 📌 Opciones Disponibles
 Opción	Descripción	Valor por defecto
@@ -61,7 +69,7 @@ results/
 ├── service_detection.txt          # Servicios detectados
 ├── takeover_http_analysis.json    # Resultados HTTP (JSON)
 └── reports/
-    └── subdomain_takeover_report_[DATE].md  # Reporte final
+└── subdomain_takeover_report_[DATE].md  # Reporte final
 
 🤝 Contribución
 ¡Contribuciones son bienvenidas! Por favor abre un issue o pull request con tus mejoras.
