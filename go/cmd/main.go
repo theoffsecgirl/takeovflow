@@ -1,4 +1,4 @@
-package takeovflow
+package scanner
 
 import (
 	"fmt"
