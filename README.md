@@ -31,18 +31,18 @@ cd takeoverflow
 chmod +x takeoverflow.sh
 ```
 
-🛠 Uso Básico
-bash
-# Escanear un solo dominio
+# 🛠 Uso Básico
+
+### Escanear un solo dominio
 `./takeoverflow.sh -d example.com`
 
-# Escanear múltiples dominios desde archivo
+### Escanear múltiples dominios desde archivo
 `./takeoverflow.sh -f dominios.txt`
 
-# Escanear lista de dominios
+### Escanear lista de dominios
 `./takeoverflow.sh -l "domain1.com,domain2.com"`
 
-# Personalizar threads y rate limit
+### Personalizar threads y rate limit
 `./takeoverflow.sh -d example.com -t 100 -r 5`
 📌 Opciones Disponibles
 Opción	Descripción	Valor por defecto
