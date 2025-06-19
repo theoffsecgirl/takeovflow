@@ -1,12 +1,10 @@
-package scanner
+package takeovflow
 
 import (
-    "fmt"
-    "os"
-    "time"
+	"fmt"
 
-    "github.com/tu-usuario/takeovflow/internal/utils"
-    "github.com/tu-usuario/takeovflow/internal/scanner"
+	"github.com/tu-usuario/takeovflow/internal/scanner"
+	"github.com/tu-usuario/takeovflow/internal/utils"
 )
 
 const VERSION = "3.0"
