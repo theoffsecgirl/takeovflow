@@ -29,7 +29,7 @@ Clonar repositorio o instalar con Go:
 ```bash
 go install github.com/TheOffSecGirl/takeovflow@latest
 -----
-git clone https://github.com/TheOffSecGirl/takeoverflow.git
+git clone https://github.com/theoffsecgirl/takeoverflow.git
 cd takeoverflow
 # Dar permisos de ejecución:
 chmod +x takeoverflow.sh
