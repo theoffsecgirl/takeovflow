@@ -27,7 +27,7 @@ TakeOverFlow es una solución todo-en-uno para identificar vulnerabilidades de s
 Clonar repositorio o instalar con Go:
 
 ```bash
-go install github.com/TheOffSecGirl/takeovflow@latest
+go install github.com/theoffsecgirl/takeovflow@latest
 -----
 git clone https://github.com/theoffsecgirl/takeoverflow.git
 cd takeoverflow
