@@ -107,7 +107,7 @@ Por favor, abre issues para reportar bugs o sugerir mejoras.
 
 ## Licencia
 
-Proyecto libre para uso ético y educativo.  
+Proyecto libre para uso ético.  
 No se ofrece garantía alguna.
 
 ***
