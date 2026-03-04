@@ -1,176 +1,354 @@
-# takeovflow
+# takeovflow v2.0
 
-Subdomain Takeover Scanner avanzado escrito en Python  
-Versión mejorada por **TheOffSecGirl**
-
----
-
-## Descripción
-
-`takeovflow` es un escáner ofensivo diseñado para detectar posibles **subdomain takeovers** combinando descubrimiento pasivo, resolución activa, detección con subjack/nuclei y análisis de patrones de CNAME asociados a servicios susceptibles de takeover.
-
-Incluye:
-
-- Descubrimiento pasivo (subfinder, assetfinder)
-- Resolución DNS (dnsx)
-- Fingerprints de takeover (subjack)
-- Templates de takeover (nuclei)
-- Detección de patrones de CNAME sospechosos
-- Informe automático en Markdown
-- (Opcional) Informe JSON para pipelines o integraciones
+Subdomain Takeover Scanner avanzado con detección mejorada, arquitectura OOP y sistema de severidad.
 
 ---
 
-## Requisitos
+## 🚀 Novedades v2.0 (2026)
 
-Herramientas externas necesarias:
+### Mejoras Técnicas
+- ✅ **Arquitectura OOP** con clases organizadas
+- ✅ **Sistema de severidad** (Critical/High/Medium/Low)
+- ✅ **Fingerprints ampliados** (100+ servicios)
+- ✅ **Detección mejorada** de CNAME patterns
+- ✅ **DNS resolution** con dnspython (más rápido)
+- ✅ **HTML reporting** con gráficos
+- ✅ **Webhook integration** para alertas
+- ✅ **Rate limiting** avanzado por servicio
+- ✅ **Colored output** con progress bars
 
-- subfinder
-- assetfinder
-- dnsx
-- httpx
-- subjack
-- nuclei
-- dig
-- jq
-- curl
-- Python 3.7+
-
-El script comprueba automáticamente su disponibilidad.
+### Servicios Detectados (100+)
+- AWS S3, CloudFront, Elastic Beanstalk
+- Azure Websites, Traffic Manager, Storage
+- GitHub Pages, Heroku, Netlify
+- Vercel, Fastly, Akamai
+- WordPress, Tumblr, Shopify
+- Zendesk, HelpScout, Statuspage
+- Cargo, Pantheon, Bitbucket
+- ... y muchos más
 
 ---
 
-## Instalación
+## 📦 Instalación
 
 ```bash
 git clone https://github.com/theoffsecgirl/tool-takeovflow.git
 cd tool-takeovflow
-chmod +x takeovflow.py
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+### Herramientas Externas (Opcionales)
+
+```bash
+# Descubrimiento
+GO111MODULE=on go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+go install -v github.com/tomnomnom/assetfinder@latest
+
+# Resolución y detección
+GO111MODULE=on go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest
+GO111MODULE=on go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+GO111MODULE=on go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+go install -v github.com/haccer/subjack@latest
 ```
 
 ---
 
-## Uso rápido
+## 🔥 Uso Básico
 
 ### Dominio único
 
 ```bash
-python3 takeovflow.py -d example.com -v
+python3 takeovflow.py -d example.com
 ```
 
-### Archivo con dominios
+### Lista de dominios
 
 ```bash
-python3 takeovflow.py -f scope.txt
+python3 takeovflow.py -f domains.txt -o results
 ```
 
-### Lista separada por comas
+### Con todas las herramientas externas
 
 ```bash
-python3 takeovflow.py -l "dom1.com,dom2.net"
+python3 takeovflow.py -d example.com \
+  --use-external \
+  --threads 100 \
+  -v
+```
+
+### Solo modo rápido (sin external tools)
+
+```bash
+python3 takeovflow.py -d example.com --quick
 ```
 
 ---
 
-## Modos nuevos
+## ⚙️ Opciones CLI
 
-### Solo pasivo
+| Flag                | Descripción                                      |
+|---------------------|-------------------------------------------------|
+| `-d, --domain`      | Dominio objetivo                                |
+| `-f, --file`        | Archivo con lista de dominios                   |
+| `-l, --list`        | Lista de dominios separada por comas            |
+| `-o, --output`      | Directorio de output (default: takeovflow_out)  |
+| `-t, --threads`     | Número de threads (default: 50)                 |
+| `--use-external`    | Usar herramientas externas (subfinder, etc.)    |
+| `--quick`           | Modo rápido (solo DNS + fingerprints)          |
+| `--html-report`     | Generar reporte HTML                            |
+| `--webhook`         | URL webhook para alertas                        |
+| `--severity`        | Severidad mínima (critical/high/medium/low)    |
+| `-v, --verbose`     | Modo verbose                                    |
 
-```bash
-python3 takeovflow.py -d example.com --passive-only
+---
+
+## 🎯 Detección de Takeovers
+
+### Sistema de Severidad
+
+**Critical:**
+- S3 bucket sin reclamar (AWS)
+- GitHub Pages sin repo
+- Heroku app eliminada
+- Azure website no existe
+
+**High:**
+- CloudFront distribution dangling
+- Netlify site sin claim
+- Vercel deployment missing
+- Shopify store no encontrada
+
+**Medium:**
+- Tumblr blog disponible
+- WordPress.com site sin claim
+- Bitbucket pages dangling
+
+**Low:**
+- CNAME sospechoso pero sin confirmar
+- Wildcard DNS response
+
+### Fingerprints Incluidos (100+)
+
+```python
+CRITICAL_SERVICES = [
+    "s3.amazonaws.com",           # AWS S3
+    "github.io",                   # GitHub Pages
+    "herokuapp.com",               # Heroku
+    "azurewebsites.net",           # Azure
+]
+
+HIGH_SERVICES = [
+    "cloudfront.net",              # CloudFront
+    "netlify.app",                 # Netlify
+    "vercel.app",                  # Vercel
+    "shopify.com",                 # Shopify
+]
+
+MEDIUM_SERVICES = [
+    "tumblr.com",                  # Tumblr
+    "wordpress.com",               # WordPress
+    "bitbucket.io",                # Bitbucket
+]
 ```
 
-### Solo activo
+---
 
-```bash
-python3 takeovflow.py -d example.com --active-only
+## 📊 Formatos de Output
+
+### JSON Output
+
+```json
+{
+  "scan_date": "2026-03-04T19:00:00Z",
+  "scanner_version": "2.0",
+  "domains_scanned": 5,
+  "vulnerabilities_found": 3,
+  "severity_summary": {
+    "critical": 1,
+    "high": 2,
+    "medium": 0,
+    "low": 0
+  },
+  "findings": [
+    {
+      "subdomain": "dev.example.com",
+      "cname": "example-dev.s3.amazonaws.com",
+      "service": "AWS S3",
+      "severity": "critical",
+      "evidence": "NoSuchBucket",
+      "exploitable": true,
+      "timestamp": 1709577600.123
+    }
+  ]
+}
 ```
 
-### Informe JSON
+### HTML Report
 
-```bash
-python3 takeovflow.py -d example.com --json-output
-```
+- Summary dashboard con gráficos
+- Tabla filtrable de vulnerabilidades
+- Severidad por colores
+- Export a CSV/PDF
 
-### Templates personalizados de nuclei
+### Markdown Report
 
-```bash
-python3 takeovflow.py -d example.com --nuclei-templates ./mis-templates/
-```
+```markdown
+# Subdomain Takeover Report
 
----
+Generated: 2026-03-04 19:00:00 UTC
 
-## Flujo técnico
+## Summary
 
-### Fase pasiva
-- subfinder  
-- assetfinder  
-- deduplicación  
-- `*_subdomains_all.txt`
+- Domains scanned: 5
+- Vulnerabilities found: 3
+- Critical: 1
+- High: 2
 
-### Fase activa
-- dnsx resolución  
-- httpx servicios web  
-- subjack detección de takeovers  
-- nuclei checks adicionales  
-- CNAME sospechosos:
-  - AWS S3
-  - CloudFront
-  - GitHub Pages
-  - Heroku
-  - Azure
-  - Fastly
-  - más servicios conocidos
+## Findings
 
-### Output
-- Informe Markdown
-- Informe JSON (opcional)
-- Directorio temporal con todos los resultados
+### 🚨 CRITICAL: dev.example.com
 
----
-
-## Ejemplo completo
-
-```bash
-python3 takeovflow.py -f scope.txt -t 100 -r 5 -v --json-output     --nuclei-templates ./takeover-templates/
+- **CNAME:** example-dev.s3.amazonaws.com
+- **Service:** AWS S3
+- **Evidence:** NoSuchBucket
+- **Exploitable:** Yes
 ```
 
 ---
 
-## Archivos generados
+## 🔥 Ejemplos Avanzados
 
-- `takeovflow_tmp_*`
-- `*_subfinder.txt`
-- `*_assetfinder.txt`
-- `*_subdomains_all.txt`
-- `*_dnsx.txt`
-- `*_httpx.txt`
-- `*_subjack.txt`
-- `*_nuclei.txt`
-- `*_cname_patterns.txt`
-- `subdomain_takeover_report_YYYYMMDD.md`
-- `subdomain_takeover_report_YYYYMMDD.json` (si se activa)
+### Bug Bounty Pipeline
+
+```bash
+# Escaneo completo con todas las herramientas
+python3 takeovflow.py -f scope.txt \
+  --use-external \
+  --html-report \
+  --severity high \
+  --webhook https://hooks.slack.com/YOUR_WEBHOOK \
+  -o bug_bounty_scan
+```
+
+### CI/CD Integration
+
+```bash
+# Escaneo rápido solo para critical
+python3 takeovflow.py -d staging.company.com \
+  --quick \
+  --severity critical \
+  -o ci_scan
+
+# Exit code 1 si encuentra vulnerabilidades
+if [ $? -eq 1 ]; then
+  echo "Vulnerabilidades detectadas!"
+  exit 1
+fi
+```
+
+### Monitoring Continuo
+
+```bash
+# Cron job diario
+0 2 * * * cd /opt/takeovflow && python3 takeovflow.py -f domains.txt --webhook https://... -o daily_scan
+```
 
 ---
 
-## Limitaciones
+## 🧪 Webhooks
 
-- Depende de herramientas externas.
-- Posibles falsos positivos/negativos.
-- CNAME heurístico: verificar manualmente.
+Enviar alertas a Slack/Discord/Teams cuando se detecten vulnerabilidades:
+
+```bash
+python3 takeovflow.py -d example.com \
+  --webhook https://hooks.slack.com/services/YOUR/WEBHOOK/URL
+```
+
+**Payload enviado:**
+```json
+{
+  "text": "🚨 CRITICAL Takeover Detected!",
+  "attachments": [
+    {
+      "color": "danger",
+      "fields": [
+        {"title": "Subdomain", "value": "dev.example.com"},
+        {"title": "Service", "value": "AWS S3"},
+        {"title": "Severity", "value": "Critical"}
+      ]
+    }
+  ]
+}
+```
 
 ---
 
-## Licencia
+## 🎯 Casos de Uso
 
-Uso ético y responsable únicamente. Sin garantías.
+### 1. Bug Bounty Recon
+```bash
+python3 takeovflow.py -f in_scope.txt \
+  --use-external \
+  --html-report \
+  --severity high
+```
+
+### 2. Red Team Assessment
+```bash
+python3 takeovflow.py -d target.com \
+  --threads 200 \
+  -v
+```
+
+### 3. Asset Inventory
+```bash
+python3 takeovflow.py -f company_domains.txt \
+  --quick \
+  -o asset_inventory
+```
 
 ---
 
-## Autora
+## ⚠️ Limitaciones
 
-Proyecto desarrollado por **TheOffSecGirl**.
+- Requiere herramientas externas para funcionalidad completa
+- Posibles falsos positivos en detecciones heurísticas
+- Rate limiting puede afectar escaneos grandes
+- CNAME analysis es heurístico (validar manualmente)
 
-- GitHub: https://github.com/theoffsecgirl  
-- Web técnica: https://www.theoffsecgirl.com  
-- Academia: https://www.northstaracademy.io
+---
+
+## 🔬 Roadmap
+
+- [ ] Integración con subdomain enumeration pasiva (crt.sh, VirusTotal)
+- [ ] Machine learning para reducción de falsos positivos
+- [ ] Automatic exploitation PoC generation
+- [ ] Cloud provider APIs integration
+- [ ] Real-time monitoring dashboard
+
+---
+
+## 📚 Referencias
+
+- [OWASP Subdomain Takeover](https://owasp.org/www-community/attacks/Subdomain_Takeover)
+- [Can I take over XYZ?](https://github.com/EdOverflow/can-i-take-over-xyz)
+- [Subjack Fingerprints](https://github.com/haccer/subjack)
+
+---
+
+## 📖 Uso Ético
+
+Utiliza esta herramienta únicamente en:
+- ✅ Sistemas propios
+- ✅ Entornos autorizados
+- ✅ Programas de bug bounty con scope definido
+
+**El uso no autorizado es ilegal.**
+
+---
+
+## 📜 Licencia
+
+MIT License
