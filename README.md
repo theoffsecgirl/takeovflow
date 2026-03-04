@@ -1,7 +1,6 @@
 # takeovflow
 
-Subdomain Takeover Scanner avanzado escrito en Python  
-Versión mejorada por **TheOffSecGirl**
+Subdomain Takeover Scanner avanzado escrito en Python
 
 ---
 
@@ -164,13 +163,3 @@ python3 takeovflow.py -f scope.txt -t 100 -r 5 -v --json-output     --nuclei-tem
 ## Licencia
 
 Uso ético y responsable únicamente. Sin garantías.
-
----
-
-## Autora
-
-Proyecto desarrollado por **TheOffSecGirl**.
-
-- GitHub: https://github.com/theoffsecgirl  
-- Web técnica: https://www.theoffsecgirl.com  
-- Academia: https://www.northstaracademy.io
