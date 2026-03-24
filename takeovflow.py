@@ -1,13 +1,7 @@
 #!/usr/bin/env python3
 """
-takeovflow – Advanced Subdomain Takeover Scanner
-
-Versión mejorada con:
-- Comprobación de herramientas externas
-- Modos pasivo / activo
-- Salida JSON opcional
-- Soporte para templates personalizados de nuclei
-- Detección básica de patrones de CNAME típicos de takeover
+takeovflow - Advanced Subdomain Takeover Scanner
+by TheOffSecGirl
 """
 
 import argparse
@@ -19,10 +13,10 @@ import os
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set
 
 
-REQUIRED_TOOLS = [
+ALL_TOOLS = [
     "subfinder",
     "assetfinder",
     "subjack",
@@ -53,10 +47,33 @@ CNAME_TAKEOVER_PATTERNS = [
 
 def print_banner():
     print("=" * 60)
-    print(" takeovflow – Subdomain Takeover Scanner")
+    print(" takeovflow - Subdomain Takeover Scanner")
     print(" by TheOffSecGirl")
     print("=" * 60)
     print()
+
+
+def check_available_tools(verbose: bool = False) -> Set[str]:
+    """
+    Comprueba que tools estan disponibles y cuales faltan.
+    NO aborta. Devuelve el set de tools disponibles.
+    """
+    available = set()
+    missing = []
+
+    for tool in ALL_TOOLS:
+        if shutil.which(tool):
+            available.add(tool)
+        else:
+            missing.append(tool)
+
+    if missing:
+        print(f"[!] Tools no encontradas (se omitiran sus fases): {', '.join(missing)}")
+    if verbose and available:
+        print(f"[+] Tools disponibles: {', '.join(sorted(available))}")
+    print()
+
+    return available
 
 
 def run_cmd(cmd: List[str], verbose: bool = False) -> str:
@@ -65,74 +82,24 @@ def run_cmd(cmd: List[str], verbose: bool = False) -> str:
     try:
         out = subprocess.check_output(cmd, stderr=subprocess.DEVNULL)
         return out.decode(errors="ignore")
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, FileNotFoundError):
         return ""
-    except FileNotFoundError:
-        return ""
-
-
-def check_tool(tool: str) -> bool:
-    return shutil.which(tool) is not None
-
-
-def ensure_tools(verbose: bool = False):
-    missing = [t for t in REQUIRED_TOOLS if not check_tool(t)]
-    if missing:
-        print("[!] Faltan herramientas necesarias:")
-        for m in missing:
-            print(f"   - {m}")
-        print("\nInstálalas antes de ejecutar este script.")
-        sys.exit(1)
-    if verbose:
-        print("[+] Todas las herramientas externas requeridas están disponibles.\n")
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="takeovflow – Advanced Subdomain Takeover Scanner"
+        description="takeovflow - Advanced Subdomain Takeover Scanner"
     )
-    parser.add_argument("-d", "--domain", help="Dominio único a analizar")
-    parser.add_argument("-f", "--file", help="Archivo con dominios (uno por línea)")
+    parser.add_argument("-d", "--domain", help="Dominio unico a analizar")
+    parser.add_argument("-f", "--file", help="Archivo con dominios (uno por linea)")
     parser.add_argument("-l", "--list", help="Lista de dominios separada por comas")
-    parser.add_argument(
-        "-t",
-        "--threads",
-        type=int,
-        default=50,
-        help="Número de hilos para herramientas externas (por defecto 50)",
-    )
-    parser.add_argument(
-        "-r",
-        "--rate",
-        type=int,
-        default=2,
-        help="Rate limit aproximado para algunas herramientas (por defecto 2)",
-    )
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        action="store_true",
-        help="Modo verbose",
-    )
-    parser.add_argument(
-        "--passive-only",
-        action="store_true",
-        help="Solo técnicas pasivas (no escaneos activos)",
-    )
-    parser.add_argument(
-        "--active-only",
-        action="store_true",
-        help="Solo fase activa (asume subdominios ya descubiertos)",
-    )
-    parser.add_argument(
-        "--json-output",
-        action="store_true",
-        help="Generar también informe en JSON",
-    )
-    parser.add_argument(
-        "--nuclei-templates",
-        help="Ruta a templates personalizados de nuclei",
-    )
+    parser.add_argument("-t", "--threads", type=int, default=50, help="Hilos (default: 50)")
+    parser.add_argument("-r", "--rate", type=int, default=2, help="Rate limit aproximado (default: 2)")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Modo verbose")
+    parser.add_argument("--passive-only", action="store_true", help="Solo fase pasiva")
+    parser.add_argument("--active-only", action="store_true", help="Solo fase activa")
+    parser.add_argument("--json-output", action="store_true", help="Generar informe JSON")
+    parser.add_argument("--nuclei-templates", help="Ruta a templates personalizados de nuclei")
     return parser.parse_args()
 
 
@@ -148,72 +115,56 @@ def load_domains_from_file(path: str) -> List[str]:
 
 def normalize_domains(args: argparse.Namespace) -> List[str]:
     domains: List[str] = []
-
     if args.domain:
         domains.append(args.domain.strip())
-
     if args.file:
         domains.extend(load_domains_from_file(args.file))
-
     if args.list:
         parts = [p.strip() for p in args.list.split(",")]
         domains.extend([p for p in parts if p])
 
-    # dedupe y limpia
     clean: List[str] = []
     for d in domains:
         d = d.lower()
-        if d.startswith("http://"):
-            d = d[len("http://") :]
-        if d.startswith("https://"):
-            d = d[len("https://") :]
+        for prefix in ("http://", "https://"):
+            if d.startswith(prefix):
+                d = d[len(prefix):]
         d = d.strip("/")
         if d and d not in clean:
             clean.append(d)
 
     if not clean:
-        print("[!] No se han proporcionado dominios válidos.")
+        print("[!] No se han proporcionado dominios validos.")
         sys.exit(1)
 
     return clean
 
 
-def discover_subdomains(domain: str, tmpdir: Path, threads: int, verbose: bool) -> Path:
-    subfinder_out = tmpdir / f"{domain}_subfinder.txt"
-    assetfinder_out = tmpdir / f"{domain}_assetfinder.txt"
+def discover_subdomains(
+    domain: str, tmpdir: Path, threads: int, verbose: bool, available: Set[str]
+) -> Path:
     combined_out = tmpdir / f"{domain}_subdomains_all.txt"
+    subs: List[str] = []
 
     # subfinder
-    cmd_subfinder = [
-        "subfinder",
-        "-d",
-        domain,
-        "-silent",
-        "-o",
-        str(subfinder_out),
-    ]
-    run_cmd(cmd_subfinder, verbose=verbose)
+    if "subfinder" in available:
+        subfinder_out = tmpdir / f"{domain}_subfinder.txt"
+        run_cmd(["subfinder", "-d", domain, "-silent", "-o", str(subfinder_out)], verbose=verbose)
+        if subfinder_out.exists():
+            subs += [l.strip() for l in subfinder_out.read_text(errors="ignore").splitlines() if l.strip()]
+    else:
+        if verbose:
+            print(f"[~] subfinder no disponible, omitiendo.")
 
     # assetfinder
-    cmd_assetfinder = [
-        "assetfinder",
-        "--subs-only",
-        domain,
-    ]
-    out_asset = run_cmd(cmd_assetfinder, verbose=verbose)
-    if out_asset:
-        assetfinder_out.write_text(out_asset, encoding="utf-8")
+    if "assetfinder" in available:
+        out = run_cmd(["assetfinder", "--subs-only", domain], verbose=verbose)
+        subs += [l.strip() for l in out.splitlines() if l.strip()]
+    else:
+        if verbose:
+            print(f"[~] assetfinder no disponible, omitiendo.")
 
-    # combinar y deduplicar
-    subs: List[str] = []
-    for p in [subfinder_out, assetfinder_out]:
-        if p.exists():
-            with p.open("r", encoding="utf-8", errors="ignore") as f:
-                for line in f:
-                    s = line.strip()
-                    if s and s not in subs:
-                        subs.append(s)
-    subs.sort()
+    subs = sorted(set(subs))
     combined_out.write_text("\n".join(subs), encoding="utf-8")
 
     if verbose:
@@ -223,383 +174,243 @@ def discover_subdomains(domain: str, tmpdir: Path, threads: int, verbose: bool) 
 
 
 def resolve_subdomains(
-    domain: str, subs_file: Path, tmpdir: Path, threads: int, verbose: bool
+    domain: str, subs_file: Path, tmpdir: Path, threads: int, verbose: bool, available: Set[str]
 ) -> Dict[str, Any]:
-    """Usa dnsx + httpx para obtener subdominios vivos y algunos metadatos básicos."""
-    results: Dict[str, Any] = {
-        "resolved": [],
-        "httpx": [],
-    }
-
-    if not subs_file.exists():
+    results: Dict[str, Any] = {"resolved": [], "httpx": []}
+    if not subs_file.exists() or subs_file.stat().st_size == 0:
         return results
 
     # dnsx
-    dnsx_out = tmpdir / f"{domain}_dnsx.txt"
-    cmd_dnsx = [
-        "dnsx",
-        "-silent",
-        "-resp",
-        "-l",
-        str(subs_file),
-        "-o",
-        str(dnsx_out),
-    ]
-    run_cmd(cmd_dnsx, verbose=verbose)
-
-    resolved_subs: List[str] = []
-    if dnsx_out.exists():
-        for line in dnsx_out.read_text(encoding="utf-8", errors="ignore").splitlines():
-            parts = line.split()
-            if parts:
-                resolved_subs.append(parts[0].strip())
-
-    resolved_subs = sorted(set(resolved_subs))
-    results["resolved"] = resolved_subs
+    if "dnsx" in available:
+        dnsx_out = tmpdir / f"{domain}_dnsx.txt"
+        run_cmd(["dnsx", "-silent", "-resp", "-l", str(subs_file), "-o", str(dnsx_out)], verbose=verbose)
+        if dnsx_out.exists():
+            resolved = [l.split()[0].strip() for l in dnsx_out.read_text(errors="ignore").splitlines() if l.strip()]
+            results["resolved"] = sorted(set(resolved))
+    else:
+        if verbose:
+            print(f"[~] dnsx no disponible, usando lista de subdominios sin resolver.")
+        results["resolved"] = [l.strip() for l in subs_file.read_text(errors="ignore").splitlines() if l.strip()]
 
     # httpx
-    httpx_out = tmpdir / f"{domain}_httpx.txt"
-    cmd_httpx = [
-        "httpx",
-        "-silent",
-        "-status-code",
-        "-title",
-        "-follow-redirects",
-        "-threads",
-        str(threads),
-        "-l",
-        str(subs_file),
-        "-o",
-        str(httpx_out),
-    ]
-    run_cmd(cmd_httpx, verbose=verbose)
-
-    httpx_results: List[Dict[str, Any]] = []
-    if httpx_out.exists():
-        for line in httpx_out.read_text(encoding="utf-8", errors="ignore").splitlines():
-            entry = line.strip()
-            if not entry:
-                continue
-            httpx_results.append({"raw": entry})
-
-    results["httpx"] = httpx_results
+    if "httpx" in available:
+        httpx_out = tmpdir / f"{domain}_httpx.txt"
+        run_cmd([
+            "httpx", "-silent", "-status-code", "-title", "-follow-redirects",
+            "-threads", str(threads), "-l", str(subs_file), "-o", str(httpx_out)
+        ], verbose=verbose)
+        if httpx_out.exists():
+            results["httpx"] = [{"raw": l.strip()} for l in httpx_out.read_text(errors="ignore").splitlines() if l.strip()]
+    else:
+        if verbose:
+            print(f"[~] httpx no disponible, omitiendo deteccion de servicios HTTP.")
 
     if verbose:
-        print(f"[+] {domain}: {len(resolved_subs)} subdominios resueltos (dnsx)")
-        print(f"[+] {domain}: {len(httpx_results)} servicios HTTP detectados (httpx)")
+        print(f"[+] {domain}: {len(results['resolved'])} subdominios resueltos")
+        print(f"[+] {domain}: {len(results['httpx'])} servicios HTTP detectados")
 
     return results
 
 
-def run_subjack(domain: str, subs_file: Path, tmpdir: Path, verbose: bool) -> Path:
+def run_subjack(
+    domain: str, subs_file: Path, tmpdir: Path, verbose: bool, available: Set[str]
+) -> List[Dict[str, Any]]:
+    if "subjack" not in available:
+        if verbose:
+            print(f"[~] subjack no disponible, omitiendo.")
+        return []
+    if not subs_file.exists() or subs_file.stat().st_size == 0:
+        return []
+
     out_file = tmpdir / f"{domain}_subjack.txt"
-    if not subs_file.exists():
-        return out_file
-
     fingerprints = tmpdir / "fingerprints.json"
-    if not fingerprints.exists():
-        url = "https://raw.githubusercontent.com/haccer/subjack/master/fingerprints.json"
-        cmd_curl = ["curl", "-sL", url, "-o", str(fingerprints)]
-        run_cmd(cmd_curl, verbose=verbose)
 
-    cmd = [
-        "subjack",
-        "-w",
-        str(subs_file),
-        "-t",
-        "100",
-        "-timeout",
-        "30",
-        "-ssl",
-        "-c",
-        str(fingerprints),
-        "-v",
-        "-o",
-        str(out_file),
-    ]
+    if not fingerprints.exists() and "curl" in available:
+        url = "https://raw.githubusercontent.com/haccer/subjack/master/fingerprints.json"
+        run_cmd(["curl", "-sL", url, "-o", str(fingerprints)], verbose=verbose)
+
+    cmd = ["subjack", "-w", str(subs_file), "-t", "100", "-timeout", "30", "-ssl", "-v", "-o", str(out_file)]
+    if fingerprints.exists():
+        cmd += ["-c", str(fingerprints)]
     run_cmd(cmd, verbose=verbose)
 
-    return out_file
+    findings = []
+    if out_file.exists():
+        for line in out_file.read_text(errors="ignore").splitlines():
+            if line.strip():
+                findings.append({"source": "subjack", "raw": line.strip()})
+    return findings
 
 
 def run_nuclei(
-    domain: str,
-    subs_file: Path,
-    tmpdir: Path,
-    threads: int,
-    templates: Optional[str],
-    verbose: bool,
-) -> Path:
+    domain: str, subs_file: Path, tmpdir: Path, threads: int,
+    templates: Optional[str], verbose: bool, available: Set[str]
+) -> List[Dict[str, Any]]:
+    if "nuclei" not in available:
+        if verbose:
+            print(f"[~] nuclei no disponible, omitiendo.")
+        return []
+    if not subs_file.exists() or subs_file.stat().st_size == 0:
+        return []
+
     out_file = tmpdir / f"{domain}_nuclei.txt"
-    if not subs_file.exists():
-        return out_file
-
-    # por defecto usamos tags de takeover
-    cmd = [
-        "nuclei",
-        "-silent",
-        "-l",
-        str(subs_file),
-        "-tags",
-        "takeover",
-        "-o",
-        str(out_file),
-        "-c",
-        str(threads),
-    ]
-
-    # si el usuario pasa templates, sustituimos
     if templates:
-        cmd = [
-            "nuclei",
-            "-silent",
-            "-l",
-            str(subs_file),
-            "-t",
-            templates,
-            "-o",
-            str(out_file),
-            "-c",
-            str(threads),
-        ]
+        cmd = ["nuclei", "-silent", "-l", str(subs_file), "-t", templates, "-o", str(out_file), "-c", str(threads)]
+    else:
+        cmd = ["nuclei", "-silent", "-l", str(subs_file), "-tags", "takeover", "-o", str(out_file), "-c", str(threads)]
 
     run_cmd(cmd, verbose=verbose)
-    return out_file
+
+    findings = []
+    if out_file.exists():
+        for line in out_file.read_text(errors="ignore").splitlines():
+            if line.strip():
+                findings.append({"source": "nuclei", "raw": line.strip()})
+    return findings
 
 
 def analyze_cname_patterns(
-    domain: str, subs_file: Path, tmpdir: Path, verbose: bool
-) -> Path:
-    """Usa dig para revisar CNAME y buscar patrones típicos de takeover."""
+    domain: str, subs_file: Path, tmpdir: Path, verbose: bool, available: Set[str]
+) -> List[Dict[str, Any]]:
+    if "dig" not in available:
+        if verbose:
+            print(f"[~] dig no disponible, omitiendo analisis CNAME.")
+        return []
+    if not subs_file.exists() or subs_file.stat().st_size == 0:
+        return []
+
     out_file = tmpdir / f"{domain}_cname_patterns.txt"
-    if not subs_file.exists():
-        return out_file
-
     suspicious: List[str] = []
+    findings: List[Dict[str, Any]] = []
 
-    with subs_file.open("r", encoding="utf-8", errors="ignore") as f:
-        for line in f:
-            sub = line.strip()
-            if not sub:
-                continue
-            cmd = ["dig", sub, "CNAME", "+short"]
-            cname_out = run_cmd(cmd, verbose=False)
-            cname = cname_out.strip()
-            if not cname:
-                continue
-            for pattern in CNAME_TAKEOVER_PATTERNS:
-                if pattern in cname:
-                    suspicious.append(f"{sub} -> {cname}")
-                    break
+    for line in subs_file.read_text(errors="ignore").splitlines():
+        sub = line.strip()
+        if not sub:
+            continue
+        cname = run_cmd(["dig", sub, "CNAME", "+short"]).strip()
+        if not cname:
+            continue
+        for pattern in CNAME_TAKEOVER_PATTERNS:
+            if pattern in cname:
+                suspicious.append(f"{sub} -> {cname}")
+                findings.append({"source": "cname-pattern", "subdomain": sub, "cname": cname})
+                break
 
     if suspicious:
         out_file.write_text("\n".join(suspicious), encoding="utf-8")
 
     if verbose:
-        print(f"[+] {domain}: {len(suspicious)} CNAME sospechosos detectados")
+        print(f"[+] {domain}: {len(findings)} CNAME sospechosos detectados")
 
-    return out_file
-
-
-def parse_subjack_results(path: Path) -> List[Dict[str, Any]]:
-    findings: List[Dict[str, Any]] = []
-    if not path.exists():
-        return findings
-
-    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
-        if not line.strip():
-            continue
-        entry = line.strip()
-        findings.append({"source": "subjack", "raw": entry})
     return findings
 
 
-def parse_nuclei_results(path: Path) -> List[Dict[str, Any]]:
-    findings: List[Dict[str, Any]] = []
-    if not path.exists():
-        return findings
-
-    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
-        if not line.strip():
-            continue
-        entry = line.strip()
-        findings.append({"source": "nuclei", "raw": entry})
-    return findings
-
-
-def parse_cname_results(path: Path) -> List[Dict[str, Any]]:
-    findings: List[Dict[str, Any]] = []
-    if not path.exists():
-        return findings
-    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
-        if "->" not in line:
-            continue
-        sub, cname = [p.strip() for p in line.split("->", 1)]
-        findings.append(
-            {
-                "source": "cname-pattern",
-                "subdomain": sub,
-                "cname": cname,
-            }
-        )
-    return findings
-
-
-def build_markdown_report(
-    report_path: Path, summary: Dict[str, Any], verbose: bool
-):
+def build_markdown_report(report_path: Path, summary: Dict[str, Any], verbose: bool):
     lines: List[str] = []
-    lines.append(f"# Subdomain Takeover Report")
+    lines.append("# Subdomain Takeover Report")
     lines.append("")
     lines.append(f"Generado: {datetime.utcnow().isoformat()} UTC")
     lines.append("")
-    lines.append("## Resumen general")
+    lines.append("## Resumen")
     lines.append("")
     lines.append(f"- Dominios analizados: **{len(summary['domains'])}**")
     total_subs = sum(len(d.get("subdomains", [])) for d in summary["domains"].values())
-    lines.append(f"- Subdominios totales descubiertos: **{total_subs}**")
-    total_takeovers = sum(
-        len(d.get("potential_takeovers", []))
-        for d in summary["domains"].values()
-    )
-    lines.append(f"- Posibles takeovers detectados: **{total_takeovers}**")
+    lines.append(f"- Subdominios descubiertos: **{total_subs}**")
+    total_takeovers = sum(len(d.get("potential_takeovers", [])) for d in summary["domains"].values())
+    lines.append(f"- Posibles takeovers: **{total_takeovers}**")
     lines.append("")
 
     for domain, data in summary["domains"].items():
-        lines.append(f"---")
+        lines.append("---")
         lines.append(f"## Dominio: `{domain}`")
         lines.append("")
-        lines.append(
-            f"- Subdominios descubiertos: **{len(data.get('subdomains', []))}**"
-        )
-        lines.append(
-            f"- Subdominios resueltos (dnsx): **{len(data.get('resolved', []))}**"
-        )
-        lines.append(
-            f"- Posibles takeovers: **{len(data.get('potential_takeovers', []))}**"
-        )
+        lines.append(f"- Subdominios descubiertos: **{len(data.get('subdomains', []))}**")
+        lines.append(f"- Subdominios resueltos: **{len(data.get('resolved', []))}**")
+        lines.append(f"- Posibles takeovers: **{len(data.get('potential_takeovers', []))}**")
         lines.append("")
 
         if data.get("potential_takeovers"):
             lines.append("### Posibles takeovers")
             lines.append("")
-            for finding in data["potential_takeovers"]:
-                src = finding.get("source", "unknown")
-                raw = finding.get("raw") or ""
-                sub = finding.get("subdomain") or ""
-                cname = finding.get("cname") or ""
+            for f in data["potential_takeovers"]:
+                src = f.get("source", "unknown")
+                raw = f.get("raw") or ""
+                sub = f.get("subdomain") or ""
+                cname = f.get("cname") or ""
                 if raw:
                     lines.append(f"- **[{src}]** {raw}")
                 else:
-                    lines.append(
-                        f"- **[{src}]** `{sub}` -> `{cname}`"
-                    )
+                    lines.append(f"- **[{src}]** `{sub}` -> `{cname}`")
             lines.append("")
 
         if data.get("httpx"):
-            lines.append("### Servicios HTTP detectados (httpx)")
+            lines.append("### Servicios HTTP (httpx)")
             lines.append("")
             for entry in data["httpx"][:50]:
-                lines.append(f"- `{entry.get('raw','')}`")
+                lines.append(f"- `{entry.get('raw', '')}`")
             if len(data["httpx"]) > 50:
-                lines.append(f"- ... ({len(data['httpx']) - 50} más)")
+                lines.append(f"- ... ({len(data['httpx']) - 50} mas)")
             lines.append("")
 
         if data.get("subdomains"):
-            lines.append("### Subdominios descubiertos (primeros 50)")
+            lines.append("### Subdominios (primeros 50)")
             lines.append("")
             for s in data["subdomains"][:50]:
                 lines.append(f"- `{s}`")
             if len(data["subdomains"]) > 50:
-                lines.append(f"- ... ({len(data['subdomains']) - 50} más)")
+                lines.append(f"- ... ({len(data['subdomains']) - 50} mas)")
             lines.append("")
 
     report_path.write_text("\n".join(lines), encoding="utf-8")
     if verbose:
-        print(f"[+] Informe Markdown generado en: {report_path}")
+        print(f"[+] Informe Markdown: {report_path}")
 
 
 def main():
     print_banner()
     args = parse_args()
 
-    ensure_tools(verbose=args.verbose)
+    available = check_available_tools(verbose=args.verbose)
+
+    # Si no hay ninguna tool de descubrimiento, avisa pero no aborta
+    discovery_tools = {"subfinder", "assetfinder"}
+    if not discovery_tools & available and not args.active_only:
+        print("[!] No hay tools de descubrimiento pasivo disponibles (subfinder, assetfinder).")
+        print("    Instala al menos una o usa --active-only con un archivo de subdominios.")
+
     domains = normalize_domains(args)
     if args.verbose:
         print(f"[+] Dominios a analizar: {', '.join(domains)}\n")
 
-    tmpdir_str = tempfile.mkdtemp(prefix="takeovflow_tmp_")
-    tmpdir = Path(tmpdir_str)
-
+    tmpdir = Path(tempfile.mkdtemp(prefix="takeovflow_tmp_"))
     summary: Dict[str, Any] = {"domains": {}}
 
     for domain in domains:
         if args.verbose:
-            print(f"[*] Analizando dominio: {domain}")
+            print(f"[*] Analizando: {domain}")
 
         domain_data: Dict[str, Any] = {}
         subs_file: Optional[Path] = None
 
-        # Fase pasiva
         if not args.active_only:
-            subs_file = discover_subdomains(
-                domain, tmpdir=tmpdir, threads=args.threads, verbose=args.verbose
-            )
-            subdomains_list: List[str] = []
-            if subs_file.exists():
-                subdomains_list = [
-                    s.strip()
-                    for s in subs_file.read_text(
-                        encoding="utf-8", errors="ignore"
-                    ).splitlines()
-                    if s.strip()
-                ]
-            domain_data["subdomains"] = subdomains_list
+            subs_file = discover_subdomains(domain, tmpdir, args.threads, args.verbose, available)
+            domain_data["subdomains"] = [
+                l.strip() for l in subs_file.read_text(errors="ignore").splitlines() if l.strip()
+            ] if subs_file.exists() else []
         else:
             if args.verbose:
-                print(
-                    "[!] Modo --active-only: no se realiza descubrimiento pasivo. "
-                    "Debes proporcionar tú los subdominios (no implementado aquí)."
-                )
+                print("[!] --active-only: fase pasiva omitida.")
 
-        # Fase activa
-        if not args.passive_only and subs_file and subs_file.exists():
-            resolved_info = resolve_subdomains(
-                domain,
-                subs_file=subs_file,
-                tmpdir=tmpdir,
-                threads=args.threads,
-                verbose=args.verbose,
-            )
-            domain_data["resolved"] = resolved_info.get("resolved", [])
-            domain_data["httpx"] = resolved_info.get("httpx", [])
+        if not args.passive_only and subs_file and subs_file.exists() and subs_file.stat().st_size > 0:
+            resolved_info = resolve_subdomains(domain, subs_file, tmpdir, args.threads, args.verbose, available)
+            domain_data["resolved"] = resolved_info["resolved"]
+            domain_data["httpx"] = resolved_info["httpx"]
 
-            # subjack
-            subjack_out = run_subjack(
-                domain, subs_file=subs_file, tmpdir=tmpdir, verbose=args.verbose
-            )
-            subjack_findings = parse_subjack_results(subjack_out)
-
-            # nuclei
-            nuclei_out = run_nuclei(
-                domain,
-                subs_file=subs_file,
-                tmpdir=tmpdir,
-                threads=args.threads,
-                templates=args.nuclei_templates,
-                verbose=args.verbose,
-            )
-            nuclei_findings = parse_nuclei_results(nuclei_out)
-
-            # CNAME patterns
-            cname_out = analyze_cname_patterns(
-                domain, subs_file=subs_file, tmpdir=tmpdir, verbose=args.verbose
-            )
-            cname_findings = parse_cname_results(cname_out)
-
-            domain_data["potential_takeovers"] = (
-                subjack_findings + nuclei_findings + cname_findings
-            )
+            takeovers = []
+            takeovers += run_subjack(domain, subs_file, tmpdir, args.verbose, available)
+            takeovers += run_nuclei(domain, subs_file, tmpdir, args.threads, args.nuclei_templates, args.verbose, available)
+            takeovers += analyze_cname_patterns(domain, subs_file, tmpdir, args.verbose, available)
+            domain_data["potential_takeovers"] = takeovers
         else:
             domain_data.setdefault("resolved", [])
             domain_data.setdefault("httpx", [])
@@ -609,21 +420,21 @@ def main():
         if args.verbose:
             print()
 
-    # Generar informe
     now = datetime.utcnow().strftime("%Y%m%d")
     report_md = Path.cwd() / f"subdomain_takeover_report_{now}.md"
     build_markdown_report(report_md, summary, verbose=args.verbose)
 
+    report_json = None
     if args.json_output:
         report_json = Path.cwd() / f"subdomain_takeover_report_{now}.json"
         report_json.write_text(json.dumps(summary, indent=2), encoding="utf-8")
         if args.verbose:
-            print(f"[+] Informe JSON generado en: {report_json}")
+            print(f"[+] Informe JSON: {report_json}")
 
-    print("[✓] Análisis completado.")
-    print(f"    Informe Markdown: {report_md}")
-    if args.json_output:
-        print(f"    Informe JSON:     {report_json}")
+    print("[OK] Analisis completado.")
+    print(f"     Informe Markdown: {report_md}")
+    if report_json:
+        print(f"     Informe JSON:     {report_json}")
 
 
 if __name__ == "__main__":
