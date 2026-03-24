@@ -1,41 +1,30 @@
-# takeovflow
+<div align="center">
 
-Subdomain Takeover Scanner avanzado escrito en Python
+# tool-takeovflow
 
----
+**Escáner avanzado de Subdomain Takeover**
 
-## Descripción
+![Language](https://img.shields.io/badge/Python-3.7+-9E4AFF?style=flat-square&logo=python&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-9E4AFF?style=flat-square)
+![Category](https://img.shields.io/badge/Category-Bug%20Bounty%20%7C%20Recon-111111?style=flat-square)
 
-`takeovflow` es un escáner ofensivo diseñado para detectar posibles **subdomain takeovers** combinando descubrimiento pasivo, resolución activa, detección con subjack/nuclei y análisis de patrones de CNAME asociados a servicios susceptibles de takeover.
+*by [theoffsecgirl](https://github.com/theoffsecgirl)*
 
-Incluye:
-
-- Descubrimiento pasivo (subfinder, assetfinder)
-- Resolución DNS (dnsx)
-- Fingerprints de takeover (subjack)
-- Templates de takeover (nuclei)
-- Detección de patrones de CNAME sospechosos
-- Informe automático en Markdown
-- (Opcional) Informe JSON para pipelines o integraciones
+</div>
 
 ---
 
-## Requisitos
+## ¿Qué hace?
 
-Herramientas externas necesarias:
+`takeovflow` combina descubrimiento pasivo, resolución activa, fingerprinting y detección de patrones CNAME para identificar subdominios susceptibles de takeover. Genera informe en Markdown (y JSON opcional) al final del scan.
 
-- subfinder
-- assetfinder
-- dnsx
-- httpx
-- subjack
-- nuclei
-- dig
-- jq
-- curl
-- Python 3.7+
+---
 
-El script comprueba automáticamente su disponibilidad.
+## Herramientas externas requeridas
+
+`subfinder` `assetfinder` `dnsx` `httpx` `subjack` `nuclei` `dig` `jq` `curl`
+
+El script comprueba su disponibilidad automáticamente al arrancar.
 
 ---
 
@@ -49,117 +38,79 @@ chmod +x takeovflow.py
 
 ---
 
-## Uso rápido
-
-### Dominio único
+## Uso
 
 ```bash
+# Dominio único
 python3 takeovflow.py -d example.com -v
-```
 
-### Archivo con dominios
-
-```bash
+# Archivo con dominios
 python3 takeovflow.py -f scope.txt
-```
 
-### Lista separada por comas
-
-```bash
+# Lista separada por comas
 python3 takeovflow.py -l "dom1.com,dom2.net"
-```
 
----
-
-## Modos nuevos
-
-### Solo pasivo
-
-```bash
+# Solo pasivo
 python3 takeovflow.py -d example.com --passive-only
-```
 
-### Solo activo
-
-```bash
+# Solo activo
 python3 takeovflow.py -d example.com --active-only
-```
 
-### Informe JSON
-
-```bash
+# Informe JSON
 python3 takeovflow.py -d example.com --json-output
-```
 
-### Templates personalizados de nuclei
-
-```bash
+# Templates de nuclei personalizados
 python3 takeovflow.py -d example.com --nuclei-templates ./mis-templates/
+
+# Escaneo completo
+python3 takeovflow.py -f scope.txt -t 100 -r 5 -v --json-output --nuclei-templates ./takeover-templates/
 ```
 
 ---
 
 ## Flujo técnico
 
-### Fase pasiva
-- subfinder  
-- assetfinder  
-- deduplicación  
-- `*_subdomains_all.txt`
-
-### Fase activa
-- dnsx resolución  
-- httpx servicios web  
-- subjack detección de takeovers  
-- nuclei checks adicionales  
-- CNAME sospechosos:
-  - AWS S3
-  - CloudFront
-  - GitHub Pages
-  - Heroku
-  - Azure
-  - Fastly
-  - más servicios conocidos
-
-### Output
-- Informe Markdown
-- Informe JSON (opcional)
-- Directorio temporal con todos los resultados
-
----
-
-## Ejemplo completo
-
-```bash
-python3 takeovflow.py -f scope.txt -t 100 -r 5 -v --json-output     --nuclei-templates ./takeover-templates/
+```text
+[PASIVA]  subfinder + assetfinder → deduplicación
+[ACTIVA]  dnsx → httpx → subjack → nuclei → CNAME patterns
+[OUTPUT]  Markdown report + JSON (opcional)
 ```
+
+Servicios detectados vía CNAME: AWS S3, CloudFront, GitHub Pages, Heroku, Azure, Fastly y otros.
 
 ---
 
 ## Archivos generados
 
-- `takeovflow_tmp_*`
-- `*_subfinder.txt`
-- `*_assetfinder.txt`
-- `*_subdomains_all.txt`
-- `*_dnsx.txt`
-- `*_httpx.txt`
-- `*_subjack.txt`
-- `*_nuclei.txt`
-- `*_cname_patterns.txt`
-- `subdomain_takeover_report_YYYYMMDD.md`
-- `subdomain_takeover_report_YYYYMMDD.json` (si se activa)
+```text
+takeovflow_tmp_*/
+├── *_subfinder.txt
+├── *_assetfinder.txt
+├── *_subdomains_all.txt
+├── *_dnsx.txt
+├── *_httpx.txt
+├── *_subjack.txt
+├── *_nuclei.txt
+├── *_cname_patterns.txt
+├── subdomain_takeover_report_YYYYMMDD.md
+└── subdomain_takeover_report_YYYYMMDD.json
+```
 
 ---
 
 ## Limitaciones
 
-- Depende de herramientas externas.
-- Posibles falsos positivos/negativos.
-- CNAME heurístico: verificar manualmente.
+- Depende de herramientas externas
+- Posibles falsos positivos en detección CNAME — verificar manualmente
+
+---
+
+## Uso ético
+
+Solo para bug bounty, laboratorios y auditorías autorizadas. Sin garantías.
 
 ---
 
 ## Licencia
 
-Uso ético y responsable únicamente. Sin garantías.
+MIT · [theoffsecgirl](https://theoffsecgirl.com)
