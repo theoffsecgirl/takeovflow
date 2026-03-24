@@ -1,6 +1,6 @@
 <div align="center">
 
-# tool-takeovflow
+# takeovflow
 
 **Escáner avanzado de Subdomain Takeover**
 
@@ -14,25 +14,42 @@
 
 ---
 
-## ¿Qué hace?
-
-`takeovflow` combina descubrimiento pasivo, resolución activa, fingerprinting y detección de patrones CNAME para identificar subdominios susceptibles de takeover. Genera informe en Markdown (y JSON opcional) al final del scan.
+```text
+┌──────────────────────────────────────────────────────┐
+│                                                      │
+│  ███████╗██████╗ ██╗  ███████╗██████╗ ██╗   │
+│  ██╔════╝██╔══██╗██║  ╚══██╔═╝██╔══██╗██║   │
+│  █████╗  ██████╔╝██║     ██║  ██║  ██║██║   │
+│  ██╔══╝  ██╔═══╝ ██║     ██║  ██║  ██║╚═╝   │
+│  ██║     ██║     ███████╗██║  ██████╔╝██╗   │
+│  ╚═╝     ╚═╝     ╚══════╝╚═╝  ╚═════╝ ╚═╝   │
+│                                                      │
+│  Subdomain Takeover Scanner  ·  by theoffsecgirl     │
+│  subfinder · dnsx · subjack · nuclei · CNAME         │
+└──────────────────────────────────────────────────────┘
+```
 
 ---
 
-## Herramientas externas requeridas
+## ¿Qué hace?
+
+Combina descubrimiento pasivo, resolución activa, fingerprinting y detección de patrones CNAME para identificar subdominios susceptibles de takeover. Resiliente: si falta alguna herramienta externa, continúa con las disponibles.
+
+---
+
+## Herramientas externas
 
 `subfinder` `assetfinder` `dnsx` `httpx` `subjack` `nuclei` `dig` `jq` `curl`
 
-El script comprueba su disponibilidad automáticamente al arrancar.
+El script comprueba disponibilidad al arrancar y omite las fases de las tools que falten — **no aborta**.
 
 ---
 
 ## Instalación
 
 ```bash
-git clone https://github.com/theoffsecgirl/tool-takeovflow.git
-cd tool-takeovflow
+git clone https://github.com/theoffsecgirl/takeovflow.git
+cd takeovflow
 chmod +x takeovflow.py
 ```
 
@@ -47,23 +64,14 @@ python3 takeovflow.py -d example.com -v
 # Archivo con dominios
 python3 takeovflow.py -f scope.txt
 
-# Lista separada por comas
-python3 takeovflow.py -l "dom1.com,dom2.net"
-
 # Solo pasivo
 python3 takeovflow.py -d example.com --passive-only
 
 # Solo activo
 python3 takeovflow.py -d example.com --active-only
 
-# Informe JSON
-python3 takeovflow.py -d example.com --json-output
-
-# Templates de nuclei personalizados
-python3 takeovflow.py -d example.com --nuclei-templates ./mis-templates/
-
-# Escaneo completo
-python3 takeovflow.py -f scope.txt -t 100 -r 5 -v --json-output --nuclei-templates ./takeover-templates/
+# Informe JSON + templates nuclei personalizados
+python3 takeovflow.py -f scope.txt -t 100 -v --json-output --nuclei-templates ./takeover-templates/
 ```
 
 ---
@@ -80,34 +88,9 @@ Servicios detectados vía CNAME: AWS S3, CloudFront, GitHub Pages, Heroku, Azure
 
 ---
 
-## Archivos generados
-
-```text
-takeovflow_tmp_*/
-├── *_subfinder.txt
-├── *_assetfinder.txt
-├── *_subdomains_all.txt
-├── *_dnsx.txt
-├── *_httpx.txt
-├── *_subjack.txt
-├── *_nuclei.txt
-├── *_cname_patterns.txt
-├── subdomain_takeover_report_YYYYMMDD.md
-└── subdomain_takeover_report_YYYYMMDD.json
-```
-
----
-
-## Limitaciones
-
-- Depende de herramientas externas
-- Posibles falsos positivos en detección CNAME — verificar manualmente
-
----
-
 ## Uso ético
 
-Solo para bug bounty, laboratorios y auditorías autorizadas. Sin garantías.
+Solo para bug bounty, laboratorios y auditorías autorizadas.
 
 ---
 
