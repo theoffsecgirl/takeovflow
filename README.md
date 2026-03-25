@@ -5,6 +5,7 @@
 **Escáner avanzado de Subdomain Takeover**
 
 ![Language](https://img.shields.io/badge/Python-3.7+-9E4AFF?style=flat-square&logo=python&logoColor=white)
+![Version](https://img.shields.io/badge/version-1.1.0-9E4AFF?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-9E4AFF?style=flat-square)
 ![Category](https://img.shields.io/badge/Category-Bug%20Bounty%20%7C%20Recon-111111?style=flat-square)
 
@@ -24,8 +25,9 @@
 │  ██║     ██║     ███████╗██║  ██████╔╝██╗   │
 │  ╚═╝     ╚═╝     ╚══════╝╚═╝  ╚═════╝ ╚═╝   │
 │                                                      │
-│  Subdomain Takeover Scanner  ·  by theoffsecgirl     │
+│  Subdomain Takeover Scanner  v1.1.0                  │
 │  subfinder · dnsx · subjack · nuclei · CNAME         │
+│  by theoffsecgirl                                    │
 └──────────────────────────────────────────────────────┘
 ```
 
