@@ -2,7 +2,7 @@
 
 # takeovflow
 
-**Escáner avanzado de Subdomain Takeover**
+**Advanced Subdomain Takeover Scanner**
 
 ![Language](https://img.shields.io/badge/Python-3.7+-9E4AFF?style=flat-square&logo=python&logoColor=white)
 ![Version](https://img.shields.io/badge/version-1.2.0-9E4AFF?style=flat-square)
@@ -11,25 +11,27 @@
 
 *by [theoffsecgirl](https://github.com/theoffsecgirl)*
 
+> 🇪🇸 [Versión en español](README.es.md)
+
 </div>
 
 ---
 
-## ¿Qué hace?
+## What does it do?
 
-Combina descubrimiento pasivo, resolución activa, fingerprinting y detección de patrones CNAME para identificar subdominios susceptibles de takeover. Resiliente: si falta alguna herramienta externa, continúa con las disponibles.
+Combines passive discovery, active resolution, fingerprinting and CNAME pattern detection to identify subdomains vulnerable to takeover. Resilient: if an external tool is missing, it continues with the available ones.
 
 ---
 
-## Herramientas externas
+## External tools
 
 `subfinder` `assetfinder` `dnsx` `httpx` `subjack` `nuclei` `dig` `jq` `curl`
 
-El script comprueba disponibilidad al arrancar y omite las fases de las tools que falten — **no aborta**.
+The script checks availability at startup and skips phases for missing tools — **does not abort**.
 
 ---
 
-## Instalación
+## Installation
 
 ```bash
 git clone https://github.com/theoffsecgirl/takeovflow.git
@@ -39,75 +41,75 @@ chmod +x takeovflow.py
 
 ---
 
-## Uso
+## Usage
 
 ```bash
-# Dominio único
+# Single domain
 python3 takeovflow.py -d example.com -v
 
-# Archivo con dominios
+# File with domains
 python3 takeovflow.py -f scope.txt
 
-# Solo fase pasiva (descubrimiento)
+# Passive phase only (discovery)
 python3 takeovflow.py -d example.com --passive-only
 
-# Solo fase activa con subdominios ya conocidos
+# Active phase only with known subdomains
 python3 takeovflow.py --active-only --subs-file subdomains.txt -d example.com
 
-# Active-only con archivo de subdominios (sin dominio raiz)
+# Active-only with subdomains file (no root domain)
 python3 takeovflow.py --active-only --subs-file subdomains.txt
 
-# Con templates nuclei personalizados y JSON
+# Custom nuclei templates and JSON output
 python3 takeovflow.py -f scope.txt -t 100 -v --json-output --nuclei-templates ./takeover-templates/
 
-# Ver versión
+# Show version
 python3 takeovflow.py --version
 ```
 
 ---
 
-## Flujo técnico
+## Technical flow
 
 ```text
-[PASIVA]  subfinder + assetfinder → deduplicación
-[ACTIVA]  dnsx → httpx → subjack → nuclei → CNAME patterns
-[OUTPUT]  takeovflow_report_YYYYMMDD_HHMM.md + JSON (opcional)
+[PASSIVE]  subfinder + assetfinder → deduplication
+[ACTIVE]   dnsx → httpx → subjack → nuclei → CNAME patterns
+[OUTPUT]   takeovflow_report_YYYYMMDD_HHMM.md + JSON (optional)
 ```
 
-Servicios detectados vía CNAME: AWS S3, CloudFront, GitHub Pages, Heroku, Azure, Fastly, Shopify, Ghost, Surge y otros.
+Services detected via CNAME: AWS S3, CloudFront, GitHub Pages, Heroku, Azure, Fastly, Shopify, Ghost, Surge and others.
 
 ---
 
-## Parámetros
+## Parameters
 
 ```text
 Targets:
-  -d, --domain        Dominio unico
-  -f, --file          Archivo con dominios (uno por linea)
-  -l, --list          Dominios separados por comas
+  -d, --domain        Single domain
+  -f, --file          File with domains (one per line)
+  -l, --list          Comma-separated domains
 
 Mode:
-  --passive-only      Solo descubrimiento pasivo
-  --active-only       Solo fase activa (requiere --subs-file o --file)
-  --subs-file PATH    Archivo de subdominios para fase activa
+  --passive-only      Passive discovery only
+  --active-only       Active phase only (requires --subs-file or --file)
+  --subs-file PATH    Subdomains file for active phase
 
 Scan:
-  -t, --threads       Hilos (default: 50)
+  -t, --threads       Threads (default: 50)
   -r, --rate          Rate limit (default: 2)
-  -v, --verbose       Modo verbose
-  --json-output       Generar informe JSON
-  --nuclei-templates  Ruta a templates nuclei personalizados
-      --version       Muestra la versión
+  -v, --verbose       Verbose mode
+  --json-output       Generate JSON report
+  --nuclei-templates  Path to custom nuclei templates
+      --version       Show version
 ```
 
 ---
 
-## Uso ético
+## Ethical use
 
-Solo para bug bounty, laboratorios y auditorías autorizadas.
+For bug bounty, labs and authorized audits only.
 
 ---
 
-## Licencia
+## License
 
 MIT · [theoffsecgirl](https://theoffsecgirl.com)
