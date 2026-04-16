@@ -2,10 +2,10 @@
 
 # takeovflow
 
-**Escáner avanzado de Subdomain Takeover**
+**Scanner Avanzado de Subdomain Takeover**
 
 ![Language](https://img.shields.io/badge/Python-3.7+-9E4AFF?style=flat-square&logo=python&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.2.0-9E4AFF?style=flat-square)
+![Version](https://img.shields.io/badge/version-1.3.0-9E4AFF?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-9E4AFF?style=flat-square)
 ![Category](https://img.shields.io/badge/Category-Bug%20Bounty%20%7C%20Recon-111111?style=flat-square)
 
@@ -19,7 +19,9 @@
 
 ## ¿Qué hace?
 
-Combina descubrimiento pasivo, resolución activa, fingerprinting y detección de patrones CNAME para identificar subdominios susceptibles de takeover. Resiliente: si falta alguna herramienta externa, continúa con las disponibles.
+Combina descubrimiento pasivo, resolución activa, fingerprinting y detección de patrones CNAME para identificar subdominios vulnerables a takeover. Resiliente: si falta alguna herramienta externa, continúa con las disponibles.
+
+**Novedades v1.3.0:** análisis CNAME concurrente, 55 fingerprints de servicios, deduplicación de findings, filtro por severidad, timeout/reintentos configurables, resolvers DNS personalizados y directorio de salida flexible.
 
 ---
 
@@ -27,7 +29,7 @@ Combina descubrimiento pasivo, resolución activa, fingerprinting y detección d
 
 `subfinder` `assetfinder` `dnsx` `httpx` `subjack` `nuclei` `dig` `jq` `curl`
 
-El script comprueba disponibilidad al arrancar y omite las fases de las tools que falten — **no aborta**.
+El script verifica disponibilidad al arrancar y omite las fases para herramientas no instaladas — **no aborta**.
 
 ---
 
@@ -53,13 +55,13 @@ python3 takeovflow.py -f scope.txt
 # Solo fase pasiva (descubrimiento)
 python3 takeovflow.py -d example.com --passive-only
 
-# Solo fase activa con subdominios ya conocidos
+# Solo fase activa con subdominios conocidos
 python3 takeovflow.py --active-only --subs-file subdomains.txt -d example.com
 
-# Active-only con archivo de subdominios (sin dominio raiz)
-python3 takeovflow.py --active-only --subs-file subdomains.txt
+# Resolvers personalizados + directorio de salida + solo severidad HIGH
+python3 takeovflow.py -d example.com --resolvers resolvers.txt --output-dir ./reportes --min-severity HIGH
 
-# Con templates nuclei personalizados y JSON
+# Templates nuclei personalizados, JSON, 100 hilos
 python3 takeovflow.py -f scope.txt -t 100 -v --json-output --nuclei-templates ./takeover-templates/
 
 # Ver versión
@@ -71,12 +73,12 @@ python3 takeovflow.py --version
 ## Flujo técnico
 
 ```text
-[PASIVA]  subfinder + assetfinder → deduplicación
-[ACTIVA]  dnsx → httpx → subjack → nuclei → CNAME patterns
-[OUTPUT]  takeovflow_report_YYYYMMDD_HHMM.md + JSON (opcional)
+[PASIVA]   subfinder + assetfinder → deduplicación
+[ACTIVA]   dnsx → httpx → subjack → nuclei → patrones CNAME (concurrente)
+[OUTPUT]   takeovflow_report_YYYYMMDD_HHMM.md + JSON (opcional)
 ```
 
-Servicios detectados vía CNAME: AWS S3, CloudFront, GitHub Pages, Heroku, Azure, Fastly, Shopify, Ghost, Surge y otros.
+Servicios detectados vía CNAME (55 en total): AWS S3/CloudFront/Beanstalk, Azure Web Apps/Traffic Manager/Blob, Heroku, GitHub Pages, Fastly, Akamai, Netlify, Vercel, Webflow, GitBook, Shopify, Ghost, Surge, Statuspage, Bitbucket Pages, Pantheon, Kinsta, HubSpot, Freshdesk, Intercom, Cargo, Wix, Weebly, Tilda, Zendesk y más.
 
 ---
 
@@ -84,23 +86,40 @@ Servicios detectados vía CNAME: AWS S3, CloudFront, GitHub Pages, Heroku, Azure
 
 ```text
 Targets:
-  -d, --domain        Dominio unico
-  -f, --file          Archivo con dominios (uno por linea)
-  -l, --list          Dominios separados por comas
+  -d, --domain            Dominio único
+  -f, --file              Archivo con dominios (uno por línea)
+  -l, --list              Lista de dominios separada por comas
 
-Mode:
-  --passive-only      Solo descubrimiento pasivo
-  --active-only       Solo fase activa (requiere --subs-file o --file)
-  --subs-file PATH    Archivo de subdominios para fase activa
+Modo:
+  --passive-only          Solo fase pasiva
+  --active-only           Solo fase activa (requiere --subs-file o --file)
+  --subs-file PATH        Archivo de subdominios para fase activa
 
 Scan:
-  -t, --threads       Hilos (default: 50)
-  -r, --rate          Rate limit (default: 2)
-  -v, --verbose       Modo verbose
-  --json-output       Generar informe JSON
-  --nuclei-templates  Ruta a templates nuclei personalizados
-      --version       Muestra la versión
+  -t, --threads N         Hilos (default: 50)
+  -r, --rate N            Rate limit (default: 2)
+  --timeout N             Timeout por herramienta en segundos (default: 30)
+  --retries N             Reintentos ante fallo (default: 2)
+  --resolvers FILE        Archivo con resolvers DNS para dnsx
+  -v, --verbose           Modo verbose
+  --no-color              Sin emojis/color en salida
+  --json-output           Generar informe JSON
+  --output-dir DIR        Directorio de salida para reportes (default: CWD)
+  --nuclei-templates PATH Ruta a templates personalizados de nuclei
+  --min-severity LEVEL    Severidad mínima en reporte: HIGH | MEDIUM | LOW | INFO (default: INFO)
+      --version           Mostrar versión
 ```
+
+---
+
+## Niveles de severidad
+
+| Nivel | Significado |
+|-------|-------------|
+| 🔴 HIGH | Muy probablemente vulnerable, acción inmediata recomendada |
+| 🟡 MEDIUM | Requiere verificación manual |
+| 🟢 LOW | Informativo, bajo riesgo |
+| ⚪ INFO | Solo contexto |
 
 ---
 
