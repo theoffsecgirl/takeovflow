@@ -5,7 +5,7 @@
 **Scanner Avanzado de Subdomain Takeover**
 
 ![Language](https://img.shields.io/badge/Python-3.7+-9E4AFF?style=flat-square&logo=python&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.3.0-9E4AFF?style=flat-square)
+![Version](https://img.shields.io/badge/version-1.4.0-9E4AFF?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-9E4AFF?style=flat-square)
 ![Category](https://img.shields.io/badge/Category-Bug%20Bounty%20%7C%20Recon-111111?style=flat-square)
 
@@ -19,76 +19,91 @@
 
 ## ¿Qué hace?
 
-Combina descubrimiento pasivo, resolución activa, fingerprinting y detección de patrones CNAME para identificar subdominios vulnerables a takeover. Resiliente: si falta alguna herramienta externa, continúa con las disponibles.
+Combina descubrimiento pasivo, resolución DNS activa, fingerprinting HTTP y detección de CNAME dangling para identificar subdominios vulnerables a takeover. No necesita scanner externo — tiene su propio motor de fingerprinting HTTP. Resiliente: omite fases si falta alguna herramienta sin abortar.
 
-**Novedades v1.3.0:** análisis CNAME concurrente, 55 fingerprints de servicios, deduplicación de findings, filtro por severidad, timeout/reintentos configurables, resolvers DNS personalizados y directorio de salida flexible.
+**Capas de detección:**
+1. CNAME pattern matching (55 servicios)
+2. CNAME dangling detection (verificacion NXDOMAIN → alta confianza)
+3. HTTP body fingerprinting (32 patrones de error por servicio, sin falsos positivos)
+4. Templates de nuclei para takeover
+5. subjack (opcional)
+
+---
+
+## Quickstart
+
+```bash
+git clone https://github.com/theoffsecgirl/takeovflow.git
+cd takeovflow
+bash install.sh          # instala todas las herramientas externas
+python3 takeovflow.py -d example.com -v
+```
+
+O instalar como comando global:
+```bash
+pip install -e .
+takeovflow -d example.com -v
+```
 
 ---
 
 ## Herramientas externas
 
-`subfinder` `assetfinder` `dnsx` `httpx` `subjack` `nuclei` `dig` `jq` `curl`
+`subfinder` `assetfinder` `amass` `dnsx` `httpx` `subjack` `nuclei` `dig` `curl`
 
-El script verifica disponibilidad al arrancar y omite las fases para herramientas no instaladas — **no aborta**.
-
----
-
-## Instalación
-
-```bash
-git clone https://github.com/theoffsecgirl/takeovflow.git
-cd takeovflow
-chmod +x takeovflow.py
-```
+Todas opcionales — instala con `bash install.sh` (macOS + Debian/Ubuntu).
 
 ---
 
 ## Uso
 
 ```bash
-# Dominio único
+# Dominio unico, scan completo
 python3 takeovflow.py -d example.com -v
 
-# Archivo con dominios
-python3 takeovflow.py -f scope.txt
+# Archivo con dominios, JSON output
+python3 takeovflow.py -f scope.txt --json-output --output-dir ./reportes
 
-# Solo fase pasiva (descubrimiento)
+# Solo fase pasiva
 python3 takeovflow.py -d example.com --passive-only
 
-# Solo fase activa con subdominios conocidos
+# Solo fase activa desde subdominios conocidos
 python3 takeovflow.py --active-only --subs-file subdomains.txt -d example.com
 
-# Resolvers personalizados + directorio de salida + solo severidad HIGH
-python3 takeovflow.py -d example.com --resolvers resolvers.txt --output-dir ./reportes --min-severity HIGH
+# Modo pipeline: solo findings HIGH por stdout
+python3 takeovflow.py -d example.com --silent --min-severity HIGH
 
-# Templates nuclei personalizados, JSON, 100 hilos
-python3 takeovflow.py -f scope.txt -t 100 -v --json-output --nuclei-templates ./takeover-templates/
+# JSONL para jq o SIEM
+python3 takeovflow.py -d example.com --jsonl | jq 'select(.severity=="HIGH")'
 
-# Ver versión
-python3 takeovflow.py --version
+# Resolvers personalizados + rate limit
+python3 takeovflow.py -d example.com --resolvers resolvers.txt --rate 300
+
+# Sin subjack (sin mantenimiento activo)
+python3 takeovflow.py -d example.com --no-subjack
 ```
 
 ---
 
-## Flujo técnico
+## Capas de deteccion
 
-```text
-[PASIVA]   subfinder + assetfinder → deduplicación
-[ACTIVA]   dnsx → httpx → subjack → nuclei → patrones CNAME (concurrente)
-[OUTPUT]   takeovflow_report_YYYYMMDD_HHMM.md + JSON (opcional)
-```
-
-Servicios detectados vía CNAME (55 en total): AWS S3/CloudFront/Beanstalk, Azure Web Apps/Traffic Manager/Blob, Heroku, GitHub Pages, Fastly, Akamai, Netlify, Vercel, Webflow, GitBook, Shopify, Ghost, Surge, Statuspage, Bitbucket Pages, Pantheon, Kinsta, HubSpot, Freshdesk, Intercom, Cargo, Wix, Weebly, Tilda, Zendesk y más.
+| Capa | Metodo | Confianza |
+|------|--------|-----------|
+| CNAME dangling | dig CNAME + check NXDOMAIN | 🔴 HIGH |
+| HTTP fingerprinting | curl + patron en body | 🔴 HIGH |
+| nuclei | templates takeover | 🔴 HIGH / 🟡 MEDIUM |
+| CNAME pattern | patrones de servicio conocidos | 🟡 MEDIUM |
+| subjack | fingerprint DB | 🟡 MEDIUM |
 
 ---
 
-## Parámetros
+## Parametros
 
 ```text
 Targets:
-  -d, --domain            Dominio único
-  -f, --file              Archivo con dominios (uno por línea)
-  -l, --list              Lista de dominios separada por comas
+  -d, --domain            Dominio unico
+  -f, --file              Archivo con dominios (uno por linea)
+  -l, --list              Lista separada por comas
 
 Modo:
   --passive-only          Solo fase pasiva
@@ -97,17 +112,20 @@ Modo:
 
 Scan:
   -t, --threads N         Hilos (default: 50)
-  -r, --rate N            Rate limit (default: 2)
+  -r, --rate N            Rate limit req/s para dnsx + httpx (default: 150)
   --timeout N             Timeout por herramienta en segundos (default: 30)
-  --retries N             Reintentos ante fallo (default: 2)
-  --resolvers FILE        Archivo con resolvers DNS para dnsx
-  -v, --verbose           Modo verbose
-  --no-color              Sin emojis/color en salida
+  --retries N             Reintentos (default: 2)
+  --resolvers FILE        Resolvers DNS para dnsx
+  --no-http-fp            Desactivar HTTP fingerprinting propio
+  --no-subjack            Desactivar subjack
+  -v, --verbose           Verbose
+  --silent                Solo findings en stdout (piping)
+  --jsonl                 Emitir cada finding como JSON por linea
   --json-output           Generar informe JSON
-  --output-dir DIR        Directorio de salida para reportes (default: CWD)
-  --nuclei-templates PATH Ruta a templates personalizados de nuclei
-  --min-severity LEVEL    Severidad mínima en reporte: HIGH | MEDIUM | LOW | INFO (default: INFO)
-      --version           Mostrar versión
+  --output-dir DIR        Directorio de salida (default: CWD)
+  --nuclei-templates PATH Templates nuclei personalizados
+  --min-severity LEVEL    HIGH | MEDIUM | LOW | INFO (default: INFO)
+      --version           Mostrar version
 ```
 
 ---
@@ -116,16 +134,25 @@ Scan:
 
 | Nivel | Significado |
 |-------|-------------|
-| 🔴 HIGH | Muy probablemente vulnerable, acción inmediata recomendada |
-| 🟡 MEDIUM | Requiere verificación manual |
+| 🔴 HIGH | CNAME dangling (NXDOMAIN) o match HTTP body — accion inmediata |
+| 🟡 MEDIUM | CNAME pattern con destino activo — verificar manualmente |
 | 🟢 LOW | Informativo, bajo riesgo |
 | ⚪ INFO | Solo contexto |
 
 ---
 
-## Uso ético
+## Ejecutar tests
 
-Solo para bug bounty, laboratorios y auditorías autorizadas.
+```bash
+pip install pytest
+pytest tests/ -v
+```
+
+---
+
+## Uso etico
+
+Solo para bug bounty, laboratorios y auditorias autorizadas.
 
 ---
 

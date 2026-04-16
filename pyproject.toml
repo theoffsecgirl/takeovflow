@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "takeovflow"
+version = "1.4.0"
+description = "Advanced Subdomain Takeover Scanner"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "theoffsecgirl", email = "hi@theoffsecgirl.com" }]
+requires-python = ">=3.7"
+keywords = ["subdomain", "takeover", "recon", "bug-bounty", "security"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Security",
+]
+
+[project.scripts]
+takeovflow = "takeovflow:main"
+
+[project.urls]
+Homepage = "https://github.com/theoffsecgirl/takeovflow"
+Repository = "https://github.com/theoffsecgirl/takeovflow"
+
+[tool.setuptools]
+py-modules = ["takeovflow"]
