@@ -2,10 +2,9 @@
 
 # takeovflow
 
-**Scanner Avanzado de Subdomain Takeover**
+**Scanner avanzado de subdomain takeover — pasivo + activo + fingerprinting CNAME**
 
-![Language](https://img.shields.io/badge/Python-3.7+-9E4AFF?style=flat-square&logo=python&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.3.0-9E4AFF?style=flat-square)
+![Language](https://img.shields.io/badge/Python-3.8+-9E4AFF?style=flat-square&logo=python&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-9E4AFF?style=flat-square)
 ![Category](https://img.shields.io/badge/Category-Bug%20Bounty%20%7C%20Recon-111111?style=flat-square)
 
@@ -19,9 +18,70 @@
 
 ## ¿Qué hace?
 
-Combina descubrimiento pasivo, resolución activa, fingerprinting y detección de patrones CNAME para identificar subdominios vulnerables a takeover. Resiliente: si falta alguna herramienta externa, continúa con las disponibles.
+Escanea subdominios en busca de vulnerabilidades de takeover usando tres enfoques:
+- **Pasivo**: descubrimiento de subdominios con `subfinder` + `assetfinder`, resolución DNS de CNAMEs
+- **Activo**: análisis de respuestas HTTP con `httpx`, confirmación de takeover con `subjack` + `nuclei`
+- **Fingerprinting**: coincidencia de patrones CNAME específicos por proveedor en 55 servicios (GitHub Pages, Heroku, Fastly, S3, Shopify, etc.)
 
-**Novedades v1.3.0:** análisis CNAME concurrente, 55 fingerprints de servicios, deduplicación de findings, filtro por severidad, timeout/reintentos configurables, resolvers DNS personalizados y directorio de salida flexible.
+Resiliente: si falta alguna herramienta externa, continúa con las disponibles — **no aborta**.
+
+---
+
+## Proveedores soportados
+
+| Proveedor | Método de detección |
+|-----------|---------------------|
+| GitHub Pages | CNAME (`github.io`) + patrón de body |
+| Heroku | CNAME (`herokudns.com`, `herokuapp.com`) + status |
+| Amazon S3 / Beanstalk | CNAME (`amazonaws.com`, `elasticbeanstalk.com`) |
+| AWS CloudFront | CNAME (`cloudfront.net`) |
+| Azure Web Apps | CNAME (`azurewebsites.net`, `trafficmanager.net`) |
+| Fastly | CNAME (`fastly.net`) |
+| Shopify | CNAME (`shopify.com`) + body |
+| Zendesk | CNAME (`zendesk.com`) + status |
+| Netlify | CNAME (`netlify.app`, `netlify.com`) |
+| Vercel | CNAME (`vercel.app`) |
+| Ghost | CNAME (`ghost.io`) + body |
+| Surge.sh | CNAME (`surge.sh`) + body |
+| Readme.io | CNAME (`readme.io`) + body |
+| Unbounce | CNAME (`unbouncepages.com`) + body |
+| Webflow | CNAME (`webflow.io`) |
+| GitBook | CNAME (`gitbook.io`, `gitbook.com`) |
+| Wix | CNAME (`wixdns.net`) |
+| Weebly | CNAME (`weebly.com`) |
+| Tilda | CNAME (`tilda.ws`) |
+| Statuspage | CNAME (`statuspage.io`) |
+| + 35 más | Akamai, HubSpot, Freshdesk, Pantheon, Kinsta… |
+
+---
+
+## Ejemplo de salida
+
+```text
+[*] Dominios cargados: 1
+[*] Ejecutando descubrimiento pasivo: subfinder, assetfinder
+[*] Subdominios encontrados: 1247
+[*] Resolviendo CNAMEs (concurrente)...
+
+[!] POSIBLE TAKEOVER → blog.example.com
+    CNAME  : example.github.io
+    Servicio: GitHub Pages
+    Severidad: HIGH
+
+[!] POSIBLE TAKEOVER → cdn.example.com
+    CNAME  : example.s3.amazonaws.com
+    Servicio: AWS S3 / Elastic Beanstalk
+    Severidad: HIGH
+
+[~] INVESTIGAR → api.example.com
+    CNAME  : example.herokudns.com
+    Servicio: Heroku
+    Severidad: HIGH
+
+[+] Hallazgos CNAME: 3
+[+] Reporte guardado → takeovflow_report_20240416_1523.md
+[+] JSON guardado    → takeovflow_report_20240416_1523.json
+```
 
 ---
 
@@ -39,6 +99,7 @@ El script verifica disponibilidad al arrancar y omite las fases para herramienta
 git clone https://github.com/theoffsecgirl/takeovflow.git
 cd takeovflow
 chmod +x takeovflow.py
+python3 takeovflow.py --help
 ```
 
 ---
@@ -46,16 +107,16 @@ chmod +x takeovflow.py
 ## Uso
 
 ```bash
-# Dominio único
+# Dominio único (pasivo + activo + CNAME)
 python3 takeovflow.py -d example.com -v
 
-# Archivo con dominios
+# Archivo con múltiples dominios
 python3 takeovflow.py -f scope.txt
 
-# Solo fase pasiva (descubrimiento)
+# Solo fase pasiva (descubrimiento + CNAME)
 python3 takeovflow.py -d example.com --passive-only
 
-# Solo fase activa con subdominios conocidos
+# Solo fase activa con archivo de subdominios conocidos
 python3 takeovflow.py --active-only --subs-file subdomains.txt -d example.com
 
 # Resolvers personalizados + directorio de salida + solo severidad HIGH
@@ -64,8 +125,28 @@ python3 takeovflow.py -d example.com --resolvers resolvers.txt --output-dir ./re
 # Templates nuclei personalizados, JSON, 100 hilos
 python3 takeovflow.py -f scope.txt -t 100 -v --json-output --nuclei-templates ./takeover-templates/
 
+# Lista de dominios separada por comas
+python3 takeovflow.py -l example.com,target.io,scope.net
+
 # Ver versión
 python3 takeovflow.py --version
+```
+
+---
+
+## Integración en pipelines
+
+```bash
+# Pipeline recon completo — descubrimiento + escaneo en un paso
+subfinder -d example.com -silent > subdomains.txt && \
+  python3 takeovflow.py --active-only --subs-file subdomains.txt -d example.com --json-output
+
+# Después de assetfinder
+assetfinder --subs-only example.com > subs.txt && \
+  python3 takeovflow.py --active-only --subs-file subs.txt -d example.com
+
+# Múltiples objetivos desde un archivo de scope
+python3 takeovflow.py -f scope.txt -t 100 --min-severity HIGH --json-output --output-dir ./resultados
 ```
 
 ---
@@ -77,8 +158,6 @@ python3 takeovflow.py --version
 [ACTIVA]   dnsx → httpx → subjack → nuclei → patrones CNAME (concurrente)
 [OUTPUT]   takeovflow_report_YYYYMMDD_HHMM.md + JSON (opcional)
 ```
-
-Servicios detectados vía CNAME (55 en total): AWS S3/CloudFront/Beanstalk, Azure Web Apps/Traffic Manager/Blob, Heroku, GitHub Pages, Fastly, Akamai, Netlify, Vercel, Webflow, GitBook, Shopify, Ghost, Surge, Statuspage, Bitbucket Pages, Pantheon, Kinsta, HubSpot, Freshdesk, Intercom, Cargo, Wix, Weebly, Tilda, Zendesk y más.
 
 ---
 
@@ -97,17 +176,18 @@ Modo:
 
 Scan:
   -t, --threads N         Hilos (default: 50)
-  -r, --rate N            Rate limit (default: 2)
+  -r, --rate N            Rate limit req/s para httpx/dnsx (default: 150)
   --timeout N             Timeout por herramienta en segundos (default: 30)
   --retries N             Reintentos ante fallo (default: 2)
   --resolvers FILE        Archivo con resolvers DNS para dnsx
   -v, --verbose           Modo verbose
+  -q, --quiet             Suprime banner y prints intermedios
   --no-color              Sin emojis/color en salida
   --json-output           Generar informe JSON
   --output-dir DIR        Directorio de salida para reportes (default: CWD)
   --nuclei-templates PATH Ruta a templates personalizados de nuclei
-  --min-severity LEVEL    Severidad mínima en reporte: HIGH | MEDIUM | LOW | INFO (default: INFO)
-      --version           Mostrar versión
+  --min-severity LEVEL    Severidad mínima: CRITICAL | HIGH | MEDIUM | LOW | INFO (default: INFO)
+  --version               Mostrar versión
 ```
 
 ---
@@ -116,6 +196,7 @@ Scan:
 
 | Nivel | Significado |
 |-------|-------------|
+| 🔴 CRITICAL | Vector de takeover confirmado, acción inmediata requerida |
 | 🔴 HIGH | Muy probablemente vulnerable, acción inmediata recomendada |
 | 🟡 MEDIUM | Requiere verificación manual |
 | 🟢 LOW | Informativo, bajo riesgo |
@@ -126,6 +207,15 @@ Scan:
 ## Uso ético
 
 Solo para bug bounty, laboratorios y auditorías autorizadas.
+
+---
+
+## Contribuir
+
+PRs bienvenidas. Especialmente:
+- Nuevos fingerprints de proveedores
+- Corrección de falsos positivos
+- Mejoras de rendimiento para listas grandes de subdominios
 
 ---
 
