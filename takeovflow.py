@@ -12,9 +12,10 @@ Flags de modo:
   --passive-only          Solo descubrimiento pasivo, sin scanners activos
   --active-only           Solo fase activa; requiere --subs-file o --file
   --subs-file <path>      Archivo de subdominios para usar en fase activa
+  --quiet                 Suprime banner y prints intermedios (ideal para wrappers/automatizacion)
 """
 
-__version__ = "1.4.0"
+__version__ = "1.5.0"
 
 import argparse
 import json
@@ -28,6 +29,22 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
+
+
+# ------------------------------------------------------------------ #
+# Output helper
+# ------------------------------------------------------------------ #
+
+# Variable global de modo silencioso. Se setea en main() tras parsear args.
+_QUIET: bool = False
+
+
+def log(msg: str, force: bool = False) -> None:
+    """Imprime msg a stdout salvo que _QUIET este activo.
+    Usar force=True para mensajes criticos que deben salir siempre (errores fatales).
+    """
+    if not _QUIET or force:
+        print(msg)
 
 
 # ------------------------------------------------------------------ #
@@ -46,8 +63,6 @@ ALL_TOOLS = [
     "curl",
 ]
 
-# (pattern, service_name, severity)
-# severity: HIGH = almost certainly vulnerable, MEDIUM = needs manual verification
 CNAME_SERVICES: List[Tuple[str, str, str]] = [
     # AWS
     ("amazonaws.com",           "AWS S3 / Elastic Beanstalk", "HIGH"),
@@ -117,7 +132,6 @@ CNAME_SERVICES: List[Tuple[str, str, str]] = [
     ("acquia-sites.com",        "Acquia",                      "HIGH"),
 ]
 
-# FIX #6: CRITICAL añadido como nivel propio (más grave que HIGH)
 SEVERITY_COLOR = {
     "CRITICAL": "🚨",
     "HIGH":     "🔴",
@@ -134,14 +148,13 @@ _SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
 # ------------------------------------------------------------------ #
 
 def print_banner() -> None:
-    # FIX #10: ancho dinámico para no romperse con versiones largas
     inner = "  takeovflow  v{}  -  Subdomain Takeover Scanner".format(__version__)
     width = max(58, len(inner) + 2)
-    print("+" + "-" * width + "+")
-    print("|" + inner.ljust(width) + "|")
-    print("|" + "  by theoffsecgirl".ljust(width) + "|")
-    print("+" + "-" * width + "+")
-    print()
+    log("+" + "-" * width + "+")
+    log("|" + inner.ljust(width) + "|")
+    log("|" + "  by theoffsecgirl".ljust(width) + "|")
+    log("+" + "-" * width + "+")
+    log("")
 
 
 # ------------------------------------------------------------------ #
@@ -157,10 +170,10 @@ def check_available_tools(verbose: bool = False) -> Set[str]:
         else:
             missing.append(tool)
     if missing:
-        print("[!] Tools no encontradas (fases omitidas): {}".format(", ".join(missing)))
+        log("[!] Tools no encontradas (fases omitidas): {}".format(", ".join(missing)))
     if verbose and available:
-        print("[+] Tools disponibles: {}".format(", ".join(sorted(available))))
-    print()
+        log("[+] Tools disponibles: {}".format(", ".join(sorted(available))))
+    log("")
     return available
 
 
@@ -173,7 +186,7 @@ def run_cmd(
 ) -> str:
     """Ejecuta un comando y devuelve stdout. Reintenta si falla (timeout o error generico)."""
     if verbose:
-        print("[cmd] {}".format(" ".join(cmd)))
+        log("[cmd] {}".format(" ".join(cmd)))
     stderr_pipe = subprocess.PIPE if capture_stderr else subprocess.DEVNULL
     for attempt in range(max(retries, 1)):
         try:
@@ -186,20 +199,18 @@ def run_cmd(
             if capture_stderr and result.returncode != 0 and verbose:
                 err = result.stderr.decode(errors="ignore").strip()
                 if err:
-                    print("[stderr] {}".format(err[:400]))
+                    log("[stderr] {}".format(err[:400]))
             return result.stdout.decode(errors="ignore")
         except subprocess.TimeoutExpired:
-            # FIX #1: continuar el bucle en lugar de retornar inmediatamente
             if verbose:
-                print("[!] Timeout ({} s) intento {}/{}: {}".format(
+                log("[!] Timeout ({} s) intento {}/{}: {}".format(
                     timeout, attempt + 1, retries, " ".join(cmd[:3])
                 ))
         except FileNotFoundError:
-            # Herramienta no instalada: no tiene sentido reintentar
             return ""
         except Exception as exc:
             if verbose:
-                print("[!] Error inesperado (intento {}/{}): {}".format(attempt + 1, retries, exc))
+                log("[!] Error inesperado (intento {}/{}): {}".format(attempt + 1, retries, exc))
     return ""
 
 
@@ -214,7 +225,8 @@ def parse_args() -> argparse.Namespace:
         epilog="Ejemplos:\n"
                "  takeovflow.py -d example.com -v\n"
                "  takeovflow.py -f scope.txt --json-output\n"
-               "  takeovflow.py --active-only --subs-file subs.txt -d example.com\n",
+               "  takeovflow.py --active-only --subs-file subs.txt -d example.com\n"
+               "  takeovflow.py -d example.com --quiet --json-output  # para wrappers\n",
     )
 
     target = parser.add_argument_group("targets")
@@ -243,6 +255,10 @@ def parse_args() -> argparse.Namespace:
     scan.add_argument("--retries",        type=int, default=2,   help="Reintentos ante fallo (default: 2)")
     scan.add_argument("--resolvers",      metavar="FILE",        help="Archivo con resolvers DNS personalizados (para dnsx)")
     scan.add_argument("-v", "--verbose",  action="store_true",   help="Modo verbose")
+    scan.add_argument("-q", "--quiet",    action="store_true",
+                      help="Modo silencioso: suprime banner y prints intermedios. "
+                           "Solo se emiten errores fatales y la ruta del reporte al finalizar. "
+                           "Ideal para wrappers y automatizaciones.")
     scan.add_argument("--no-color",       action="store_true",   help="Sin emojis/colores en salida")
     scan.add_argument("--json-output",    action="store_true",   help="Generar informe JSON")
     scan.add_argument("--output-dir",     metavar="DIR",         help="Directorio de salida para reportes (default: CWD)")
@@ -257,17 +273,20 @@ def parse_args() -> argparse.Namespace:
 
 
 def validate_args(args: argparse.Namespace) -> None:
+    if args.quiet and args.verbose:
+        print("[!] --quiet y --verbose son mutuamente excluyentes.", file=sys.stderr)
+        sys.exit(1)
     if args.passive_only and args.active_only:
-        print("[!] --passive-only y --active-only son mutuamente excluyentes.")
+        log("[!] --passive-only y --active-only son mutuamente excluyentes.", force=True)
         sys.exit(1)
     if args.active_only and not (args.subs_file or args.file):
-        print("[!] --active-only requiere --subs-file <archivo> o --file <archivo>.")
+        log("[!] --active-only requiere --subs-file <archivo> o --file <archivo>.", force=True)
         sys.exit(1)
     if args.subs_file and not Path(args.subs_file).exists():
-        print("[!] --subs-file: archivo no encontrado: {}".format(args.subs_file))
+        log("[!] --subs-file: archivo no encontrado: {}".format(args.subs_file), force=True)
         sys.exit(1)
     if args.resolvers and not Path(args.resolvers).exists():
-        print("[!] --resolvers: archivo no encontrado: {}".format(args.resolvers))
+        log("[!] --resolvers: archivo no encontrado: {}".format(args.resolvers), force=True)
         sys.exit(1)
     if args.output_dir:
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
@@ -302,8 +321,6 @@ def normalize_domains(args: argparse.Namespace) -> List[str]:
     domains: List[str] = []
     if args.domain:
         domains.append(args.domain.strip())
-    # FIX #2: con --active-only, --file se usa como subs-file, no como lista de dominios.
-    # Los dominios siguen cargándose desde -d o -l si se proveen.
     if args.file and not args.active_only:
         domains.extend(load_domains_from_file(args.file))
     if args.list:
@@ -319,7 +336,7 @@ def normalize_domains(args: argparse.Namespace) -> List[str]:
             clean.append(d)
 
     if not clean and not args.active_only:
-        print("[!] No se han proporcionado dominios válidos.")
+        log("[!] No se han proporcionado dominios válidos.", force=True)
         sys.exit(1)
     return clean
 
@@ -360,7 +377,7 @@ def discover_subdomains(
                 for l in subfinder_out.read_text(errors="ignore").splitlines() if l.strip()
             ]
     elif verbose:
-        print("[~] subfinder no disponible.")
+        log("[~] subfinder no disponible.")
 
     if "assetfinder" in available:
         out = run_cmd(
@@ -369,12 +386,12 @@ def discover_subdomains(
         )
         subs += [l.strip() for l in out.splitlines() if l.strip()]
     elif verbose:
-        print("[~] assetfinder no disponible.")
+        log("[~] assetfinder no disponible.")
 
     subs = sorted(set(s for s in subs if s and "." in s))
     combined_out.write_text("\n".join(subs), encoding="utf-8")
 
-    print("[+] {}: {} subdominios (pasivo)".format(domain, len(subs)))
+    log("[+] {}: {} subdominios (pasivo)".format(domain, len(subs)))
     return combined_out
 
 
@@ -395,7 +412,6 @@ def resolve_subdomains(
 
     if "dnsx" in available:
         dnsx_out = tmpdir / "{}_dnsx.txt".format(domain)
-        # FIX #3: --rate aplicado a dnsx via -rl
         cmd = ["dnsx", "-silent", "-resp", "-l", str(subs_file), "-o", str(dnsx_out),
                "-t", str(threads), "-rl", str(rate)]
         if resolvers:
@@ -409,14 +425,13 @@ def resolve_subdomains(
             results["resolved"] = sorted(set(resolved))
     else:
         if verbose:
-            print("[~] dnsx no disponible, usando lista sin resolver.")
+            log("[~] dnsx no disponible, usando lista sin resolver.")
         results["resolved"] = [
             l.strip() for l in subs_file.read_text(errors="ignore").splitlines() if l.strip()
         ]
 
     if "httpx" in available:
         httpx_out = tmpdir / "{}_httpx.txt".format(domain)
-        # FIX #3: --rate aplicado a httpx via -rate
         run_cmd([
             "httpx", "-silent", "-status-code", "-title", "-follow-redirects",
             "-threads", str(threads), "-rate", str(rate),
@@ -428,10 +443,10 @@ def resolve_subdomains(
                 for l in httpx_out.read_text(errors="ignore").splitlines() if l.strip()
             ]
     elif verbose:
-        print("[~] httpx no disponible.")
+        log("[~] httpx no disponible.")
 
     if verbose:
-        print("[+] {}: {} resueltos, {} HTTP".format(
+        log("[+] {}: {} resueltos, {} HTTP".format(
             domain, len(results["resolved"]), len(results["httpx"])
         ))
     return results
@@ -444,7 +459,7 @@ def run_subjack(
 ) -> List[Dict[str, Any]]:
     if "subjack" not in available or not subs_file.exists() or subs_file.stat().st_size == 0:
         if "subjack" not in available and verbose:
-            print("[~] subjack no disponible.")
+            log("[~] subjack no disponible.")
         return []
 
     out_file = tmpdir / "{}_subjack.txt".format(domain)
@@ -454,10 +469,9 @@ def run_subjack(
         if "curl" in available:
             url = "https://raw.githubusercontent.com/haccer/subjack/master/fingerprints.json"
             run_cmd(["curl", "-sL", url, "-o", str(fingerprints)], verbose=verbose, timeout=30)
-        # FIX #4: warning explícito si no hay fingerprints
         if not fingerprints.exists():
-            print("[!] subjack: fingerprints.json no disponible (curl ausente o fallo de red). "
-                  "Los resultados pueden ser menos precisos.")
+            log("[!] subjack: fingerprints.json no disponible (curl ausente o fallo de red). "
+                "Los resultados pueden ser menos precisos.")
 
     cmd = [
         "subjack", "-w", str(subs_file),
@@ -473,7 +487,7 @@ def run_subjack(
             line = line.strip()
             if line:
                 findings.append({"source": "subjack", "severity": "HIGH", "raw": line})
-                print("  {} [subjack] {}".format(SEVERITY_COLOR["HIGH"], line))
+                log("  {} [subjack] {}".format(SEVERITY_COLOR["HIGH"], line))
     return findings
 
 
@@ -485,7 +499,7 @@ def run_nuclei(
 ) -> List[Dict[str, Any]]:
     if "nuclei" not in available or not subs_file.exists() or subs_file.stat().st_size == 0:
         if "nuclei" not in available and verbose:
-            print("[~] nuclei no disponible.")
+            log("[~] nuclei no disponible.")
         return []
 
     out_file = tmpdir / "{}_nuclei.txt".format(domain)
@@ -502,7 +516,6 @@ def run_nuclei(
         for line in out_file.read_text(errors="ignore").splitlines():
             line = line.strip()
             if line:
-                # FIX #6: critical se mapea a CRITICAL, no colapsado en HIGH
                 severity = "MEDIUM"
                 m = re.search(r"\[(critical|high|medium|low|info)\]", line, re.I)
                 if m:
@@ -514,7 +527,7 @@ def run_nuclei(
                     else:
                         severity = "HIGH"
                 findings.append({"source": "nuclei", "severity": severity, "raw": line})
-                print("  {} [nuclei] {}".format(SEVERITY_COLOR.get(severity, "⚪"), line))
+                log("  {} [nuclei] {}".format(SEVERITY_COLOR.get(severity, "⚪"), line))
     return findings
 
 
@@ -528,7 +541,6 @@ def _check_cname_single(
         result = subprocess.run(
             ["dig", sub, "CNAME", "+short"],
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-            # FIX #5: timeout parametrizado, no hardcodeado
             timeout=timeout,
         )
         cname = result.stdout.decode(errors="ignore").strip().lower()
@@ -556,7 +568,7 @@ def analyze_cname_patterns(
 ) -> List[Dict[str, Any]]:
     if "dig" not in available:
         if verbose:
-            print("[~] dig no disponible, omitiendo CNAME.")
+            log("[~] dig no disponible, omitiendo CNAME.")
         return []
     if not subs_file.exists() or subs_file.stat().st_size == 0:
         return []
@@ -579,26 +591,23 @@ def analyze_cname_patterns(
                 findings.append(result)
                 line = "{} -> {} [{}]".format(result["subdomain"], result["cname"], result["service"])
                 suspicious_lines.append(line)
-                print("  {} [cname] {}".format(
+                log("  {} [cname] {}".format(
                     SEVERITY_COLOR.get(result["severity"], "⚪"), line
                 ))
 
     if suspicious_lines:
         out_file.write_text("\n".join(suspicious_lines), encoding="utf-8")
 
-    print("[+] {}: {} CNAMEs sospechosos".format(domain, len(findings)))
+    log("[+] {}: {} CNAMEs sospechosos".format(domain, len(findings)))
     return findings
 
 
 def deduplicate_takeovers(findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Elimina duplicados por subdominio/raw + fuente."""
     seen: Set[str] = set()
     unique: List[Dict[str, Any]] = []
     for f in findings:
-        # FIX #3 (dedup): normalizar key extrayendo subdominio del raw cuando no hay subdomain
         sub = f.get("subdomain") or ""
         if not sub and f.get("raw"):
-            # extraer primer token como identificador (hostname del raw de subjack/nuclei)
             sub = f["raw"].split()[0]
         key = "{}:{}".format(f.get("source", ""), sub)
         if key not in seen:
@@ -646,7 +655,7 @@ def build_markdown_report(
         for f in d.get("potential_takeovers", [])
         if f.get("severity") == "CRITICAL"
     )
-    high_count      = sum(
+    high_count = sum(
         1 for d in summary["domains"].values()
         for f in d.get("potential_takeovers", [])
         if f.get("severity") == "HIGH"
@@ -716,7 +725,7 @@ def build_markdown_report(
 
     report_path.write_text("\n".join(lines), encoding="utf-8")
     if verbose:
-        print("[+] Informe Markdown: {}".format(report_path))
+        log("[+] Informe Markdown: {}".format(report_path))
 
 
 # ------------------------------------------------------------------ #
@@ -724,30 +733,33 @@ def build_markdown_report(
 # ------------------------------------------------------------------ #
 
 def main() -> None:
-    print_banner()
+    global _QUIET
+
     args = parse_args()
+
+    # Activar modo quiet antes de cualquier output
+    _QUIET = args.quiet
+
     validate_args(args)
+    print_banner()  # respeta _QUIET internamente via log()
 
     available = check_available_tools(verbose=args.verbose)
 
     discovery_tools = {"subfinder", "assetfinder"}
     if not discovery_tools & available and not args.active_only:
-        print("[!] Sin tools de descubrimiento pasivo. Instala subfinder/assetfinder o usa --active-only.")
+        log("[!] Sin tools de descubrimiento pasivo. Instala subfinder/assetfinder o usa --active-only.")
 
     domains = normalize_domains(args)
 
-    # FIX #2: con --active-only sin -d/-l, usar nombre genérico "scope" solo si es necesario,
-    # pero avisar al usuario para que sea consciente.
     if args.active_only and not domains:
-        print("[~] --active-only sin -d: usando 'scope' como nombre de dominio en el reporte.")
+        log("[~] --active-only sin -d: usando 'scope' como nombre de dominio en el reporte.")
         domains = ["scope"]
 
     if args.verbose:
-        print("[+] Dominios: {}\n".format(", ".join(domains)))
+        log("[+] Dominios: {}\n".format(", ".join(domains)))
 
     output_dir = Path(args.output_dir) if args.output_dir else Path.cwd()
 
-    # FIX #8: usar TemporaryDirectory como context manager para cleanup automático
     with tempfile.TemporaryDirectory(prefix="takeovflow_tmp_") as _tmpdir:
         tmpdir = Path(_tmpdir)
         summary: Dict[str, Any] = {
@@ -758,11 +770,10 @@ def main() -> None:
         }
 
         for domain in domains:
-            print("\n[*] Analizando: {}".format(domain))
+            log("\n[*] Analizando: {}".format(domain))
             domain_data: Dict[str, Any] = {}
             subs_file: Optional[Path] = None
 
-            # --- Fase pasiva ---
             if args.active_only:
                 src = args.subs_file or args.file
                 if src:
@@ -770,11 +781,11 @@ def main() -> None:
                     domain_data["subdomains"] = [
                         l.strip() for l in subs_file.read_text(errors="ignore").splitlines() if l.strip()
                     ]
-                    print("[+] {} subdominios cargados desde {}".format(
+                    log("[+] {} subdominios cargados desde {}".format(
                         len(domain_data["subdomains"]), src
                     ))
                 else:
-                    print("[!] --active-only requiere --subs-file o --file.")
+                    log("[!] --active-only requiere --subs-file o --file.", force=True)
                     sys.exit(1)
             else:
                 subs_file = discover_subdomains(
@@ -785,7 +796,6 @@ def main() -> None:
                     l.strip() for l in subs_file.read_text(errors="ignore").splitlines() if l.strip()
                 ] if subs_file and subs_file.exists() else []
 
-            # --- Fase activa ---
             if not args.passive_only and subs_file and subs_file.exists() and subs_file.stat().st_size > 0:
                 resolved_info = resolve_subdomains(
                     domain, subs_file, tmpdir, args.threads, args.rate,
@@ -797,7 +807,7 @@ def main() -> None:
                 domain_data["resolved"] = resolved_info["resolved"]
                 domain_data["httpx"]    = resolved_info["httpx"]
 
-                print("[*] Buscando takeovers en {}...".format(domain))
+                log("[*] Buscando takeovers en {}...".format(domain))
                 takeovers: List[Dict[str, Any]] = []
                 takeovers += run_subjack(
                     domain, subs_file, tmpdir, args.verbose, available,
@@ -808,7 +818,6 @@ def main() -> None:
                     args.nuclei_templates, args.verbose, available,
                     timeout=args.timeout * 4, retries=args.retries,
                 )
-                # FIX #5: pasar dig_timeout desde args.timeout
                 takeovers += analyze_cname_patterns(
                     domain, subs_file, tmpdir, args.verbose, available,
                     threads=args.threads,
@@ -836,8 +845,10 @@ def main() -> None:
             summary["finished"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
             report_json.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
             if args.verbose:
-                print("[+] Informe JSON: {}".format(report_json))
+                log("[+] Informe JSON: {}".format(report_json))
 
+        # El bloque final siempre se imprime (force=True en quiet mode)
+        # para que el wrapper sepa donde estan los reportes
         print("\n" + "=" * 60)
         print("[OK] Análisis completado.")
         print("     Markdown  : {}".format(report_md))
