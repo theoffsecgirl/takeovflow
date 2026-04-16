@@ -15,7 +15,7 @@ Flags de modo:
   --quiet                 Suprime banner y prints intermedios (ideal para wrappers/automatizacion)
 """
 
-__version__ = "1.5.0"
+__version__ = "1.5.1"
 
 import argparse
 import json
@@ -35,14 +35,10 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 # Output helper
 # ------------------------------------------------------------------ #
 
-# Variable global de modo silencioso. Se setea en main() tras parsear args.
 _QUIET: bool = False
 
 
 def log(msg: str, force: bool = False) -> None:
-    """Imprime msg a stdout salvo que _QUIET este activo.
-    Usar force=True para mensajes criticos que deben salir siempre (errores fatales).
-    """
     if not _QUIET or force:
         print(msg)
 
@@ -64,28 +60,22 @@ ALL_TOOLS = [
 ]
 
 CNAME_SERVICES: List[Tuple[str, str, str]] = [
-    # AWS
     ("amazonaws.com",           "AWS S3 / Elastic Beanstalk", "HIGH"),
     ("cloudfront.net",          "AWS CloudFront",              "MEDIUM"),
     ("elasticbeanstalk.com",    "AWS Elastic Beanstalk",       "HIGH"),
-    # Azure
     ("azurewebsites.net",       "Azure Web Apps",              "HIGH"),
     ("trafficmanager.net",      "Azure Traffic Manager",       "HIGH"),
     ("blob.core.windows.net",   "Azure Blob Storage",          "HIGH"),
     ("azure-api.net",           "Azure API Management",        "MEDIUM"),
     ("cloudapp.net",            "Azure Cloud App",             "MEDIUM"),
-    # Heroku
     ("herokudns.com",           "Heroku",                      "HIGH"),
     ("herokuapp.com",           "Heroku",                      "HIGH"),
-    # GitHub
     ("github.io",               "GitHub Pages",                "HIGH"),
     ("githubusercontent.com",   "GitHub Raw",                  "MEDIUM"),
-    # Fastly / Akamai / CDN
     ("fastly.net",              "Fastly CDN",                  "HIGH"),
     ("edgesuite.net",           "Akamai",                      "MEDIUM"),
     ("akamai.net",              "Akamai",                      "MEDIUM"),
     ("akamaized.net",           "Akamai",                      "MEDIUM"),
-    # SaaS / Plataformas
     ("unbouncepages.com",       "Unbounce",                    "HIGH"),
     ("wordpress.com",           "WordPress.com",               "HIGH"),
     ("zendesk.com",             "Zendesk",                     "HIGH"),
@@ -104,7 +94,6 @@ CNAME_SERVICES: List[Tuple[str, str, str]] = [
     ("netlify.app",             "Netlify",                     "HIGH"),
     ("netlify.com",             "Netlify",                     "HIGH"),
     ("vercel.app",              "Vercel",                      "HIGH"),
-    # Docs / Support
     ("gitbook.io",              "GitBook",                     "HIGH"),
     ("gitbook.com",             "GitBook",                     "HIGH"),
     ("statuspage.io",           "Atlassian Statuspage",        "HIGH"),
@@ -113,7 +102,6 @@ CNAME_SERVICES: List[Tuple[str, str, str]] = [
     ("freshdesk.com",           "Freshdesk",                   "HIGH"),
     ("intercom.help",           "Intercom",                    "HIGH"),
     ("cargo.site",              "Cargo",                       "HIGH"),
-    # Analytics / Marketing
     ("pantheonsite.io",         "Pantheon",                    "HIGH"),
     ("kinsta.cloud",            "Kinsta",                      "HIGH"),
     ("flywheel.io",             "Flywheel",                    "HIGH"),
@@ -133,11 +121,11 @@ CNAME_SERVICES: List[Tuple[str, str, str]] = [
 ]
 
 SEVERITY_COLOR = {
-    "CRITICAL": "🚨",
-    "HIGH":     "🔴",
-    "MEDIUM":   "🟡",
-    "LOW":      "🟢",
-    "INFO":     "⚪",
+    "CRITICAL": "\U0001f6a8",
+    "HIGH":     "\U0001f534",
+    "MEDIUM":   "\U0001f7e1",
+    "LOW":      "\U0001f7e2",
+    "INFO":     "\u26aa",
 }
 
 _SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
@@ -177,6 +165,23 @@ def check_available_tools(verbose: bool = False) -> Set[str]:
     return available
 
 
+def _subjack_supports_flag(flag: str) -> bool:
+    """Devuelve True si la version instalada de subjack acepta el flag dado.
+    Lanza subjack sin argumentos y parsea el help de stderr.
+    """
+    try:
+        result = subprocess.run(
+            ["subjack"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=5,
+        )
+        output = (result.stdout + result.stderr).decode(errors="ignore")
+        return flag in output
+    except Exception:
+        return False
+
+
 def run_cmd(
     cmd: List[str],
     verbose: bool = False,
@@ -184,7 +189,6 @@ def run_cmd(
     timeout: int = 300,
     retries: int = 1,
 ) -> str:
-    """Ejecuta un comando y devuelve stdout. Reintenta si falla (timeout o error generico)."""
     if verbose:
         log("[cmd] {}".format(" ".join(cmd)))
     stderr_pipe = subprocess.PIPE if capture_stderr else subprocess.DEVNULL
@@ -230,8 +234,8 @@ def parse_args() -> argparse.Namespace:
     )
 
     target = parser.add_argument_group("targets")
-    target.add_argument("-d", "--domain", help="Dominio único a analizar")
-    target.add_argument("-f", "--file",   help="Archivo con dominios (uno por línea)")
+    target.add_argument("-d", "--domain", help="Dominio \u00fanico a analizar")
+    target.add_argument("-f", "--file",   help="Archivo con dominios (uno por l\u00ednea)")
     target.add_argument("-l", "--list",   help="Lista de dominios separada por comas")
 
     mode = parser.add_argument_group("mode")
@@ -264,7 +268,7 @@ def parse_args() -> argparse.Namespace:
     scan.add_argument("--output-dir",     metavar="DIR",         help="Directorio de salida para reportes (default: CWD)")
     scan.add_argument("--nuclei-templates", help="Ruta a templates personalizados de nuclei")
     scan.add_argument("--min-severity",   choices=["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"],
-                      default="INFO",      help="Filtro mínimo de severidad en reporte (default: INFO)")
+                      default="INFO",      help="Filtro m\u00ednimo de severidad en reporte (default: INFO)")
     parser.add_argument(
         "--version", action="version",
         version="takeovflow {}".format(__version__),
@@ -312,7 +316,7 @@ def _clean_domain(d: str) -> str:
         if d.startswith(prefix):
             d = d[len(prefix):]
     d = d.strip("/").split("/")[0]
-    if ":" in d and not d.startswith("["):  # IPv6 excluido
+    if ":" in d and not d.startswith("["):
         d = d.split(":")[0]
     return d
 
@@ -336,7 +340,7 @@ def normalize_domains(args: argparse.Namespace) -> List[str]:
             clean.append(d)
 
     if not clean and not args.active_only:
-        log("[!] No se han proporcionado dominios válidos.", force=True)
+        log("[!] No se han proporcionado dominios v\u00e1lidos.", force=True)
         sys.exit(1)
     return clean
 
@@ -462,23 +466,29 @@ def run_subjack(
             log("[~] subjack no disponible.")
         return []
 
-    out_file = tmpdir / "{}_subjack.txt".format(domain)
+    out_file     = tmpdir / "{}_subjack.txt".format(domain)
     fingerprints = tmpdir / "fingerprints.json"
 
-    if not fingerprints.exists():
+    # Detectar si esta version de subjack soporta -c (fingerprints custom)
+    supports_c = _subjack_supports_flag("-c")
+
+    if supports_c and not fingerprints.exists():
         if "curl" in available:
             url = "https://raw.githubusercontent.com/haccer/subjack/master/fingerprints.json"
             run_cmd(["curl", "-sL", url, "-o", str(fingerprints)], verbose=verbose, timeout=30)
         if not fingerprints.exists():
-            log("[!] subjack: fingerprints.json no disponible (curl ausente o fallo de red). "
-                "Los resultados pueden ser menos precisos.")
+            log("[!] subjack: fingerprints.json no disponible. Los resultados pueden ser menos precisos.")
 
     cmd = [
         "subjack", "-w", str(subs_file),
-        "-t", "100", "-timeout", str(timeout), "-ssl", "-v", "-o", str(out_file),
+        "-t", "100", "-timeout", str(timeout), "-ssl", "-v",
+        "-o", str(out_file),
     ]
-    if fingerprints.exists():
+    if supports_c and fingerprints.exists():
         cmd += ["-c", str(fingerprints)]
+    elif not supports_c and verbose:
+        log("[~] subjack: flag -c no soportado en esta version, usando fingerprints integrados.")
+
     run_cmd(cmd, verbose=verbose, capture_stderr=verbose, timeout=timeout * 2, retries=retries)
 
     findings = []
@@ -527,7 +537,7 @@ def run_nuclei(
                     else:
                         severity = "HIGH"
                 findings.append({"source": "nuclei", "severity": severity, "raw": line})
-                log("  {} [nuclei] {}".format(SEVERITY_COLOR.get(severity, "⚪"), line))
+                log("  {} [nuclei] {}".format(SEVERITY_COLOR.get(severity, "\u26aa"), line))
     return findings
 
 
@@ -536,7 +546,6 @@ def _check_cname_single(
     verbose: bool,
     timeout: int = 10,
 ) -> Optional[Dict[str, Any]]:
-    """Resuelve CNAME de un único subdominio con dig y retorna finding si coincide."""
     try:
         result = subprocess.run(
             ["dig", sub, "CNAME", "+short"],
@@ -592,7 +601,7 @@ def analyze_cname_patterns(
                 line = "{} -> {} [{}]".format(result["subdomain"], result["cname"], result["service"])
                 suspicious_lines.append(line)
                 log("  {} [cname] {}".format(
-                    SEVERITY_COLOR.get(result["severity"], "⚪"), line
+                    SEVERITY_COLOR.get(result["severity"], "\u26aa"), line
                 ))
 
     if suspicious_lines:
@@ -643,7 +652,7 @@ def build_markdown_report(
     lines.append("")
     lines.append("## Resumen")
     lines.append("")
-    lines.append("| Métrica | Valor |")
+    lines.append("| M\u00e9trica | Valor |")
     lines.append("|---------|-------|")
     lines.append("| Dominios analizados | **{}** |".format(len(summary["domains"])))
     total_subs      = sum(len(d.get("subdomains", []))          for d in summary["domains"].values())
@@ -682,7 +691,7 @@ def build_markdown_report(
         lines.append("")
 
         if data.get("potential_takeovers"):
-            lines.append("### ⚠️ Posibles Takeovers")
+            lines.append("### \u26a0\ufe0f Posibles Takeovers")
             lines.append("")
             lines.append("| Severidad | Fuente | Detalle |")
             lines.append("|-----------|--------|---------|")
@@ -696,11 +705,11 @@ def build_markdown_report(
                 sub   = f.get("subdomain") or ""
                 cname = f.get("cname") or ""
                 svc   = f.get("service") or ""
-                emoji = SEVERITY_COLOR.get(sev, "⚪")
+                emoji = SEVERITY_COLOR.get(sev, "\u26aa")
                 if raw:
                     detail = raw.replace("|", "\\|")
                 else:
-                    detail = "`{}` → `{}` ({})".format(sub, cname, svc)
+                    detail = "`{}` \u2192 `{}` ({})".format(sub, cname, svc)
                 lines.append("| {} {} | `{}` | {} |".format(emoji, sev, src, detail))
             lines.append("")
 
@@ -710,7 +719,7 @@ def build_markdown_report(
             for entry in data["httpx"][:100]:
                 lines.append("- `{}`".format(entry.get("raw", "")))
             if len(data["httpx"]) > 100:
-                lines.append("- *... {} más*".format(len(data["httpx"]) - 100))
+                lines.append("- *... {} m\u00e1s*".format(len(data["httpx"]) - 100))
             lines.append("")
 
         if data.get("subdomains"):
@@ -720,7 +729,7 @@ def build_markdown_report(
             for s in shown:
                 lines.append("- `{}`".format(s))
             if len(data["subdomains"]) > 100:
-                lines.append("- *... {} más*".format(len(data["subdomains"]) - 100))
+                lines.append("- *... {} m\u00e1s*".format(len(data["subdomains"]) - 100))
             lines.append("")
 
     report_path.write_text("\n".join(lines), encoding="utf-8")
@@ -736,12 +745,10 @@ def main() -> None:
     global _QUIET
 
     args = parse_args()
-
-    # Activar modo quiet antes de cualquier output
     _QUIET = args.quiet
 
     validate_args(args)
-    print_banner()  # respeta _QUIET internamente via log()
+    print_banner()
 
     available = check_available_tools(verbose=args.verbose)
 
@@ -847,18 +854,16 @@ def main() -> None:
             if args.verbose:
                 log("[+] Informe JSON: {}".format(report_json))
 
-        # El bloque final siempre se imprime (force=True en quiet mode)
-        # para que el wrapper sepa donde estan los reportes
         print("\n" + "=" * 60)
-        print("[OK] Análisis completado.")
+        print("[OK] An\u00e1lisis completado.")
         print("     Markdown  : {}".format(report_md))
         if report_json:
             print("     JSON      : {}".format(report_json))
         total_findings = sum(len(d.get("potential_takeovers", [])) for d in summary["domains"].values())
         if total_findings:
-            print("     ⚠️  {} posible(s) takeover(s) encontrado(s)".format(total_findings))
+            print("     \u26a0\ufe0f  {} posible(s) takeover(s) encontrado(s)".format(total_findings))
         else:
-            print("     ✅ Sin takeovers detectados")
+            print("     \u2705 Sin takeovers detectados")
         print("=" * 60)
 
 
