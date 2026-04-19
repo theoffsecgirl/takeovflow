@@ -21,142 +21,72 @@
 Scans subdomains for takeover vulnerabilities using three approaches:
 - **Passive**: subdomain discovery via `subfinder` + `assetfinder`, DNS CNAME resolution
 - **Active**: HTTP response analysis with `httpx`, takeover confirmation with `subjack` + `nuclei`
-- **Fingerprinting**: provider-specific CNAME pattern matching across 55 services (GitHub Pages, Heroku, Fastly, S3, Shopify, etc.)
+- **Fingerprinting**: provider-specific CNAME pattern matching across takeover-prone services
 
 Resilient: if an external tool is missing, it continues with the available ones — **does not abort**.
 
----
-
-## Supported providers
-
-| Provider | Detection method |
-|----------|------------------|
-| GitHub Pages | CNAME (`github.io`) + body pattern |
-| Heroku | CNAME (`herokudns.com`, `herokuapp.com`) + status |
-| Amazon S3 / Beanstalk | CNAME (`amazonaws.com`, `elasticbeanstalk.com`) |
-| AWS CloudFront | CNAME (`cloudfront.net`) |
-| Azure Web Apps | CNAME (`azurewebsites.net`, `trafficmanager.net`) |
-| Fastly | CNAME (`fastly.net`) |
-| Shopify | CNAME (`shopify.com`) + body |
-| Zendesk | CNAME (`zendesk.com`) + status |
-| Netlify | CNAME (`netlify.app`, `netlify.com`) |
-| Vercel | CNAME (`vercel.app`) |
-| Ghost | CNAME (`ghost.io`) + body |
-| Surge.sh | CNAME (`surge.sh`) + body |
-| Readme.io | CNAME (`readme.io`) + body |
-| Unbounce | CNAME (`unbouncepages.com`) + body |
-| Webflow | CNAME (`webflow.io`) |
-| GitBook | CNAME (`gitbook.io`, `gitbook.com`) |
-| Wix | CNAME (`wixdns.net`) |
-| Weebly | CNAME (`weebly.com`) |
-| Tilda | CNAME (`tilda.ws`) |
-| Statuspage | CNAME (`statuspage.io`) |
-| + 35 more | Akamai, HubSpot, Freshdesk, Pantheon, Kinsta… |
+Important: normalized findings are **signals / candidates**, not guaranteed takeovers.
 
 ---
 
-## Output example
+## New workflow features
 
-```text
-[*] Domains loaded: 1
-[*] Running passive discovery: subfinder, assetfinder
-[*] Subdomains found: 1247
-[*] Resolving CNAMEs (concurrent)...
+- normalized findings schema compatible with `bbcopilot`
+- `confidence` per finding
+- `reason` and `evidence`
+- `--format json|jsonl`
+- `--stdout` for pipelines
+- logs and banners sent to `stderr`
 
-[!] POTENTIAL TAKEOVER → blog.example.com
-    CNAME : example.github.io
-    Service: GitHub Pages
-    Severity: HIGH
+---
 
-[!] POTENTIAL TAKEOVER → cdn.example.com
-    CNAME : example.s3.amazonaws.com
-    Service: AWS S3 / Elastic Beanstalk
-    Severity: HIGH
+## Normalized finding example
 
-[~] INVESTIGATE → api.example.com
-    CNAME : example.herokudns.com
-    Service: Heroku
-    Severity: HIGH
-
-[+] CNAME findings: 3
-[+] Report saved → takeovflow_report_20240416_1523.md
-[+] JSON saved   → takeovflow_report_20240416_1523.json
+```json
+{"type":"candidate","vector":"subdomain_takeover","target":"blog.example.com","host":"blog.example.com","method":"DNS/HTTP","param":null,"severity":"high","confidence":"medium","reason":"CNAME points to a known takeover-prone provider (GitHub Pages)","evidence":["cname match: example.github.io","provider fingerprint: GitHub Pages"],"tags":["takeover","cname-pattern","github-pages"],"raw":{"source":"cname-pattern","subdomain":"blog.example.com","cname":"example.github.io","service":"GitHub Pages","severity":"HIGH"}}
 ```
 
----
+### Confidence heuristic
 
-## External tools
-
-`subfinder` `assetfinder` `dnsx` `httpx` `subjack` `nuclei` `dig` `jq` `curl`
-
-The script checks availability at startup and skips phases for missing tools — **does not abort**.
-
----
-
-## Installation
-
-```bash
-git clone https://github.com/theoffsecgirl/takeovflow.git
-cd takeovflow
-chmod +x takeovflow.py
-python3 takeovflow.py --help
-```
+- **high** → `subjack` or strong `nuclei` signal
+- **medium** → CNAME points to a known takeover-prone provider
+- **low** → weak or generic signal
 
 ---
 
 ## Usage
 
 ```bash
-# Single domain (passive + active + CNAME)
+# Classic usage
 python3 takeovflow.py -d example.com -v
+python3 takeovflow.py -f scope.txt --json-output
 
-# File with multiple domains
-python3 takeovflow.py -f scope.txt
+# Normalized JSONL output to file
+python3 takeovflow.py -d example.com --json-output --format jsonl --output-dir ./results
 
-# Passive phase only (discovery + CNAME)
-python3 takeovflow.py -d example.com --passive-only
-
-# Active phase only with a known subdomains file
-python3 takeovflow.py --active-only --subs-file subdomains.txt -d example.com
-
-# Custom resolvers + output dir + only HIGH severity
-python3 takeovflow.py -d example.com --resolvers resolvers.txt --output-dir ./reports --min-severity HIGH
-
-# Custom nuclei templates, JSON output, 100 threads
-python3 takeovflow.py -f scope.txt -t 100 -v --json-output --nuclei-templates ./takeover-templates/
-
-# Comma-separated list of domains
-python3 takeovflow.py -l example.com,target.io,scope.net
-
-# Show version
-python3 takeovflow.py --version
+# Normalized findings to stdout
+python3 takeovflow.py -d example.com --format jsonl --stdout
 ```
 
 ---
 
 ## Workflow integration
 
+### Save and ingest into `bb-copilot`
+
 ```bash
-# Full recon pipeline — discover + scan in one shot
-subfinder -d example.com -silent > subdomains.txt && \
-  python3 takeovflow.py --active-only --subs-file subdomains.txt -d example.com --json-output
-
-# After assetfinder
-assetfinder --subs-only example.com > subs.txt && \
-  python3 takeovflow.py --active-only --subs-file subs.txt -d example.com
-
-# Multiple targets from a scope file
-python3 takeovflow.py -f scope.txt -t 100 --min-severity HIGH --json-output --output-dir ./results
+python3 takeovflow.py -d example.com --json-output --format jsonl --output-dir ./results
+bbcopilot ingest takeovflow ./results/takeovflow_findings_YYYYMMDD_HHMM.jsonl
+bbcopilot findings --tool takeovflow
+bbcopilot correlate
+bbcopilot auto-triage
 ```
 
----
+### Pipe-oriented workflow
 
-## Technical flow
-
-```text
-[PASSIVE]  subfinder + assetfinder → deduplication
-[ACTIVE]   dnsx → httpx → subjack → nuclei → CNAME patterns (concurrent)
-[OUTPUT]   takeovflow_report_YYYYMMDD_HHMM.md + JSON (optional)
+```bash
+python3 takeovflow.py -d example.com --format jsonl --stdout > takeovers.jsonl
+bbcopilot ingest takeovflow takeovers.jsonl
 ```
 
 ---
@@ -182,40 +112,20 @@ Scan:
   --resolvers FILE        Custom DNS resolvers file for dnsx
   -v, --verbose           Verbose mode
   -q, --quiet             Suppress banner and intermediate output
-  --no-color              Disable emoji/color output
-  --json-output           Generate JSON report
+  --json-output           Generate classic JSON report and normalized findings file
   --output-dir DIR        Output directory for reports (default: CWD)
   --nuclei-templates PATH Path to custom nuclei templates
   --min-severity LEVEL    Minimum severity: CRITICAL | HIGH | MEDIUM | LOW | INFO (default: INFO)
+  --format                Normalized findings format: json | jsonl
+  --stdout                Print normalized findings to stdout
   --version               Show version
 ```
-
----
-
-## Severity levels
-
-| Level | Meaning |
-|-------|---------|
-| 🔴 CRITICAL | Confirmed takeover vector, immediate action required |
-| 🔴 HIGH | Very likely vulnerable, immediate action recommended |
-| 🟡 MEDIUM | Needs manual verification |
-| 🟢 LOW | Informational, low risk |
-| ⚪ INFO | Context only |
 
 ---
 
 ## Ethical use
 
 Only on programs where subdomain takeover testing is in scope. For bug bounty, labs and authorized audits only.
-
----
-
-## Contributing
-
-PRs welcome. Especially:
-- New provider fingerprints
-- False positive fixes
-- Performance improvements for large subdomain lists
 
 ---
 
