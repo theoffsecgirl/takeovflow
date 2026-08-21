@@ -21,7 +21,6 @@ __version__ = "1.6.0"
 
 import argparse
 import json
-import os
 import re
 import shutil
 import ssl
@@ -33,8 +32,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
-
+from typing import Any
 
 # ------------------------------------------------------------------ #
 # Output helper
@@ -64,7 +62,7 @@ ALL_TOOLS = [
     "curl",
 ]
 
-CNAME_SERVICES: List[Tuple[str, str, str]] = [
+CNAME_SERVICES: list[tuple[str, str, str]] = [
     ("amazonaws.com",           "AWS S3 / Elastic Beanstalk", "HIGH"),
     ("cloudfront.net",          "AWS CloudFront",              "MEDIUM"),
     ("elasticbeanstalk.com",    "AWS Elastic Beanstalk",       "HIGH"),
@@ -132,7 +130,7 @@ CNAME_SERVICES: List[Tuple[str, str, str]] = [
 # servicios donde la propia fuente no clasifica la firma como "Vulnerable"
 # puro (puede haber falsos positivos por protecciones anti-takeover del
 # proveedor) -- se confirma igual pero con nota explicita en el reporte.
-HTTP_VERIFY_SIGNATURES: Dict[str, Dict[str, Any]] = {
+HTTP_VERIFY_SIGNATURES: dict[str, dict[str, Any]] = {
     "amazonaws.com": {
         "signature": "The specified bucket does not exist",
         "edge_case": False,
@@ -175,7 +173,7 @@ UNCONFIRMED_PREFIX = "[PATRÓN SIN CONFIRMAR — requiere verificación manual] 
 # ------------------------------------------------------------------ #
 
 def print_banner() -> None:
-    inner = "  takeovflow  v{}  -  Subdomain Takeover Scanner".format(__version__)
+    inner = f"  takeovflow  v{__version__}  -  Subdomain Takeover Scanner"
     width = max(58, len(inner) + 2)
     log("+" + "-" * width + "+")
     log("|" + inner.ljust(width) + "|")
@@ -188,9 +186,9 @@ def print_banner() -> None:
 # Tools
 # ------------------------------------------------------------------ #
 
-def check_available_tools(verbose: bool = False) -> Set[str]:
-    available: Set[str] = set()
-    missing: List[str] = []
+def check_available_tools(verbose: bool = False) -> set[str]:
+    available: set[str] = set()
+    missing: list[str] = []
     for tool in ALL_TOOLS:
         if shutil.which(tool):
             available.add(tool)
@@ -211,9 +209,9 @@ def _subjack_supports_flag(flag: str) -> bool:
     try:
         result = subprocess.run(
             ["subjack"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             timeout=5,
+            check=False,
         )
         output = (result.stdout + result.stderr).decode(errors="ignore")
         return flag in output
@@ -222,7 +220,7 @@ def _subjack_supports_flag(flag: str) -> bool:
 
 
 def run_cmd(
-    cmd: List[str],
+    cmd: list[str],
     verbose: bool = False,
     capture_stderr: bool = False,
     timeout: int = 300,
@@ -238,11 +236,12 @@ def run_cmd(
                 stdout=subprocess.PIPE,
                 stderr=stderr_pipe,
                 timeout=timeout,
+                check=False,
             )
             if capture_stderr and result.returncode != 0 and verbose:
                 err = result.stderr.decode(errors="ignore").strip()
                 if err:
-                    log("[stderr] {}".format(err[:400]))
+                    log(f"[stderr] {err[:400]}")
             return result.stdout.decode(errors="ignore")
         except subprocess.TimeoutExpired:
             if verbose:
@@ -253,7 +252,7 @@ def run_cmd(
             return ""
         except Exception as exc:
             if verbose:
-                log("[!] Error inesperado (intento {}/{}): {}".format(attempt + 1, retries, exc))
+                log(f"[!] Error inesperado (intento {attempt + 1}/{retries}): {exc}")
     return ""
 
 
@@ -263,7 +262,7 @@ def run_cmd(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="takeovflow v{} - Advanced Subdomain Takeover Scanner".format(__version__),
+        description=f"takeovflow v{__version__} - Advanced Subdomain Takeover Scanner",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="Ejemplos:\n"
                "  takeovflow.py -d example.com -v\n"
@@ -316,7 +315,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--version", action="version",
-        version="takeovflow {}".format(__version__),
+        version=f"takeovflow {__version__}",
     )
     return parser.parse_args()
 
@@ -332,10 +331,10 @@ def validate_args(args: argparse.Namespace) -> None:
         log("[!] --active-only requiere --subs-file <archivo> o --file <archivo>.", force=True)
         sys.exit(1)
     if args.subs_file and not Path(args.subs_file).exists():
-        log("[!] --subs-file: archivo no encontrado: {}".format(args.subs_file), force=True)
+        log(f"[!] --subs-file: archivo no encontrado: {args.subs_file}", force=True)
         sys.exit(1)
     if args.resolvers and not Path(args.resolvers).exists():
-        log("[!] --resolvers: archivo no encontrado: {}".format(args.resolvers), force=True)
+        log(f"[!] --resolvers: archivo no encontrado: {args.resolvers}", force=True)
         sys.exit(1)
     if args.output_dir:
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
@@ -345,8 +344,8 @@ def validate_args(args: argparse.Namespace) -> None:
 # Domains
 # ------------------------------------------------------------------ #
 
-def load_domains_from_file(path: str) -> List[str]:
-    domains: List[str] = []
+def load_domains_from_file(path: str) -> list[str]:
+    domains: list[str] = []
     with open(path, "r", encoding="utf-8", errors="ignore") as f:
         for line in f:
             d = line.strip()
@@ -358,16 +357,15 @@ def load_domains_from_file(path: str) -> List[str]:
 def _clean_domain(d: str) -> str:
     d = d.lower().strip()
     for prefix in ("http://", "https://"):
-        if d.startswith(prefix):
-            d = d[len(prefix):]
+        d = d.removeprefix(prefix)
     d = d.strip("/").split("/")[0]
     if ":" in d and not d.startswith("["):
         d = d.split(":")[0]
     return d
 
 
-def normalize_domains(args: argparse.Namespace) -> List[str]:
-    domains: List[str] = []
+def normalize_domains(args: argparse.Namespace) -> list[str]:
+    domains: list[str] = []
     if args.domain:
         domains.append(args.domain.strip())
     if args.file and not args.active_only:
@@ -376,8 +374,8 @@ def normalize_domains(args: argparse.Namespace) -> List[str]:
         parts = [p.strip() for p in args.list.split(",")]
         domains.extend([p for p in parts if p])
 
-    clean: List[str] = []
-    seen: Set[str] = set()
+    clean: list[str] = []
+    seen: set[str] = set()
     for d in domains:
         d = _clean_domain(d)
         if d and d not in seen:
@@ -391,8 +389,8 @@ def normalize_domains(args: argparse.Namespace) -> List[str]:
 
 
 def build_subs_file_from_external(path: str, domain: str, tmpdir: Path) -> Path:
-    dest = tmpdir / "{}_subdomains_all.txt".format(domain)
-    lines: List[str] = []
+    dest = tmpdir / f"{domain}_subdomains_all.txt"
+    lines: list[str] = []
     with open(path, "r", encoding="utf-8", errors="ignore") as f:
         for line in f:
             sub = line.strip()
@@ -408,14 +406,14 @@ def build_subs_file_from_external(path: str, domain: str, tmpdir: Path) -> Path:
 
 def discover_subdomains(
     domain: str, tmpdir: Path, threads: int,
-    verbose: bool, available: Set[str],
+    verbose: bool, available: set[str],
     timeout: int = 120,
 ) -> Path:
-    combined_out = tmpdir / "{}_subdomains_all.txt".format(domain)
-    subs: List[str] = []
+    combined_out = tmpdir / f"{domain}_subdomains_all.txt"
+    subs: list[str] = []
 
     if "subfinder" in available:
-        subfinder_out = tmpdir / "{}_subfinder.txt".format(domain)
+        subfinder_out = tmpdir / f"{domain}_subfinder.txt"
         run_cmd(
             ["subfinder", "-d", domain, "-silent", "-o", str(subfinder_out)],
             verbose=verbose, timeout=timeout,
@@ -437,10 +435,10 @@ def discover_subdomains(
     elif verbose:
         log("[~] assetfinder no disponible.")
 
-    subs = sorted(set(s for s in subs if s and "." in s))
+    subs = sorted({s for s in subs if s and "." in s})
     combined_out.write_text("\n".join(subs), encoding="utf-8")
 
-    log("[+] {}: {} subdominios (pasivo)".format(domain, len(subs)))
+    log(f"[+] {domain}: {len(subs)} subdominios (pasivo)")
     return combined_out
 
 
@@ -450,17 +448,17 @@ def discover_subdomains(
 
 def resolve_subdomains(
     domain: str, subs_file: Path, tmpdir: Path,
-    threads: int, rate: int, verbose: bool, available: Set[str],
-    resolvers: Optional[str] = None,
+    threads: int, rate: int, verbose: bool, available: set[str],
+    resolvers: str | None = None,
     timeout: int = 60,
     retries: int = 2,
-) -> Dict[str, Any]:
-    results: Dict[str, Any] = {"resolved": [], "httpx": []}
+) -> dict[str, Any]:
+    results: dict[str, Any] = {"resolved": [], "httpx": []}
     if not subs_file.exists() or subs_file.stat().st_size == 0:
         return results
 
     if "dnsx" in available:
-        dnsx_out = tmpdir / "{}_dnsx.txt".format(domain)
+        dnsx_out = tmpdir / f"{domain}_dnsx.txt"
         cmd = ["dnsx", "-silent", "-resp", "-l", str(subs_file), "-o", str(dnsx_out),
                "-t", str(threads), "-rl", str(rate)]
         if resolvers:
@@ -480,7 +478,7 @@ def resolve_subdomains(
         ]
 
     if "httpx" in available:
-        httpx_out = tmpdir / "{}_httpx.txt".format(domain)
+        httpx_out = tmpdir / f"{domain}_httpx.txt"
         run_cmd([
             "httpx", "-silent", "-status-code", "-title", "-follow-redirects",
             "-threads", str(threads), "-rate", str(rate),
@@ -503,15 +501,15 @@ def resolve_subdomains(
 
 def run_subjack(
     domain: str, subs_file: Path, tmpdir: Path,
-    verbose: bool, available: Set[str],
+    verbose: bool, available: set[str],
     timeout: int = 120, retries: int = 2,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     if "subjack" not in available or not subs_file.exists() or subs_file.stat().st_size == 0:
         if "subjack" not in available and verbose:
             log("[~] subjack no disponible.")
         return []
 
-    out_file     = tmpdir / "{}_subjack.txt".format(domain)
+    out_file     = tmpdir / f"{domain}_subjack.txt"
     fingerprints = tmpdir / "fingerprints.json"
 
     # Detectar si esta version de subjack soporta -c (fingerprints custom)
@@ -548,16 +546,16 @@ def run_subjack(
 
 def run_nuclei(
     domain: str, subs_file: Path, tmpdir: Path,
-    threads: int, templates: Optional[str],
-    verbose: bool, available: Set[str],
+    threads: int, templates: str | None,
+    verbose: bool, available: set[str],
     timeout: int = 120, retries: int = 2,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     if "nuclei" not in available or not subs_file.exists() or subs_file.stat().st_size == 0:
         if "nuclei" not in available and verbose:
             log("[~] nuclei no disponible.")
         return []
 
-    out_file = tmpdir / "{}_nuclei.txt".format(domain)
+    out_file = tmpdir / f"{domain}_nuclei.txt"
     if templates:
         cmd = ["nuclei", "-silent", "-l", str(subs_file), "-t", templates,
                "-o", str(out_file), "-c", str(threads)]
@@ -572,7 +570,7 @@ def run_nuclei(
             line = line.strip()
             if line:
                 severity = "MEDIUM"
-                m = re.search(r"\[(critical|high|medium|low|info)\]", line, re.I)
+                m = re.search(r"\[(critical|high|medium|low|info)\]", line, re.IGNORECASE)
                 if m:
                     lvl = m.group(1).upper()
                     if lvl == "CRITICAL":
@@ -586,7 +584,7 @@ def run_nuclei(
     return findings
 
 
-def _fetch_body_for_verify(sub: str, timeout: int) -> Optional[str]:
+def _fetch_body_for_verify(sub: str, timeout: int) -> str | None:
     """GET simple a http(s)://sub para verificacion de firma. Prueba https y
     luego http; certificados invalidos se ignoran (frecuentes en recursos
     huerfanos). Devuelve None ante cualquier fallo (timeout, DNS, conexion).
@@ -594,9 +592,9 @@ def _fetch_body_for_verify(sub: str, timeout: int) -> Optional[str]:
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
-    headers = {"User-Agent": "takeovflow/{}".format(__version__)}
+    headers = {"User-Agent": f"takeovflow/{__version__}"}
     for scheme in ("https", "http"):
-        url = "{}://{}".format(scheme, sub)
+        url = f"{scheme}://{sub}"
         try:
             req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
@@ -615,7 +613,7 @@ def _fetch_body_for_verify(sub: str, timeout: int) -> Optional[str]:
     return None
 
 
-def _http_verify_cname(sub: str, cname: str, timeout: int) -> Optional[Dict[str, Any]]:
+def _http_verify_cname(sub: str, cname: str, timeout: int) -> dict[str, Any] | None:
     """Verificacion HTTP minima para los patrones CNAME mas comunes (ver
     HTTP_VERIFY_SIGNATURES). Si la firma de "recurso no encontrado" del
     proveedor aparece en la respuesta, devuelve confirmacion; si no aplica o
@@ -646,12 +644,13 @@ def _check_cname_single(
     timeout: int = 10,
     http_verify: bool = True,
     http_verify_timeout: int = 8,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     try:
         result = subprocess.run(
             ["dig", sub, "CNAME", "+short"],
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             timeout=timeout,
+            check=False,
         )
         cname = result.stdout.decode(errors="ignore").strip().lower()
     except Exception:
@@ -682,12 +681,12 @@ def _check_cname_single(
 
 def analyze_cname_patterns(
     domain: str, subs_file: Path, tmpdir: Path,
-    verbose: bool, available: Set[str],
+    verbose: bool, available: set[str],
     threads: int = 50,
     dig_timeout: int = 10,
     http_verify: bool = True,
     http_verify_timeout: int = 8,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     if "dig" not in available:
         if verbose:
             log("[~] dig no disponible, omitiendo CNAME.")
@@ -698,9 +697,9 @@ def analyze_cname_patterns(
     subdomains = [
         l.strip() for l in subs_file.read_text(errors="ignore").splitlines() if l.strip()
     ]
-    findings: List[Dict[str, Any]] = []
-    out_file = tmpdir / "{}_cname_patterns.txt".format(domain)
-    suspicious_lines: List[str] = []
+    findings: list[dict[str, Any]] = []
+    out_file = tmpdir / f"{domain}_cname_patterns.txt"
+    suspicious_lines: list[str] = []
 
     with ThreadPoolExecutor(max_workers=threads) as executor:
         futures = {
@@ -726,11 +725,11 @@ def analyze_cname_patterns(
     if suspicious_lines:
         out_file.write_text("\n".join(suspicious_lines), encoding="utf-8")
 
-    log("[+] {}: {} CNAMEs sospechosos".format(domain, len(findings)))
+    log(f"[+] {domain}: {len(findings)} CNAMEs sospechosos")
     return findings
 
 
-_URL_HOST_RE = re.compile(r"https?://([^\s/\\]+)", re.I)
+_URL_HOST_RE = re.compile(r"https?://([^\s/\\]+)", re.IGNORECASE)
 _BARE_HOST_RE = re.compile(r"\b((?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,62})?\.)+[a-zA-Z]{2,63})\b")
 
 # fuentes que verifican el takeover por firma/fingerprint real, no solo por
@@ -754,14 +753,14 @@ def _extract_subdomain_from_raw(raw: str) -> str:
     return parts[0].strip().lower() if parts else ""
 
 
-def _finding_subdomain(f: Dict[str, Any]) -> str:
+def _finding_subdomain(f: dict[str, Any]) -> str:
     sub = f.get("subdomain")
     if sub:
         return sub.strip().lower()
     return _extract_subdomain_from_raw(f.get("raw", ""))
 
 
-def _service_base_severity(service: str) -> Optional[str]:
+def _service_base_severity(service: str) -> str | None:
     """Severidad original (sin degradar) que CNAME_SERVICES asigna a un servicio."""
     for _pattern, svc, severity in CNAME_SERVICES:
         if svc == service:
@@ -769,7 +768,7 @@ def _service_base_severity(service: str) -> Optional[str]:
     return None
 
 
-def _merge_findings(items: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _merge_findings(items: list[dict[str, Any]]) -> dict[str, Any]:
     """Fusiona findings del mismo subdominio detectados por fuentes distintas.
 
     Si al menos una fuente fuerte (subjack/nuclei, verificacion real por firma)
@@ -778,7 +777,7 @@ def _merge_findings(items: List[Dict[str, Any]]) -> Dict[str, Any]:
     cualquier componente cname-pattern. Conserva el detalle de cada fuente
     individual en 'sources_detail' para no perder evidencia al fusionar.
     """
-    sources: List[str] = []
+    sources: list[str] = []
     for it in items:
         s = it.get("source", "unknown")
         if s not in sources:
@@ -788,7 +787,7 @@ def _merge_findings(items: List[Dict[str, Any]]) -> Dict[str, Any]:
         s in _STRONG_SOURCES for s in sources
     )
 
-    candidate_severities: List[str] = []
+    candidate_severities: list[str] = []
     for it in items:
         sev = it.get("severity", "INFO")
         if confirmed and it.get("source") == "cname-pattern" and not it.get("confirmed", True):
@@ -815,10 +814,10 @@ def _merge_findings(items: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def deduplicate_takeovers(findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def deduplicate_takeovers(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
     # Paso 1: elimina duplicados exactos de la misma fuente+subdominio.
-    seen: Set[str] = set()
-    dedup_by_source: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    dedup_by_source: list[dict[str, Any]] = []
     for f in findings:
         sub = _finding_subdomain(f)
         key = "{}:{}".format(f.get("source", ""), sub)
@@ -828,21 +827,21 @@ def deduplicate_takeovers(findings: List[Dict[str, Any]]) -> List[Dict[str, Any]
 
     # Paso 2: agrupa por subdominio, fusionando findings de fuentes distintas
     # que apuntan al mismo subdominio y subiendo la confianza cuando coinciden.
-    groups: Dict[str, List[Dict[str, Any]]] = {}
+    groups: dict[str, list[dict[str, Any]]] = {}
     for f in dedup_by_source:
         sub = _finding_subdomain(f)
-        key = sub if sub else "__nosub__:{}".format(id(f))
+        key = sub if sub else f"__nosub__:{id(f)}"
         groups.setdefault(key, []).append(f)
 
-    merged: List[Dict[str, Any]] = []
+    merged: list[dict[str, Any]] = []
     for items in groups.values():
         merged.append(items[0] if len(items) == 1 else _merge_findings(items))
     return merged
 
 
 def filter_by_severity(
-    findings: List[Dict[str, Any]], min_severity: str
-) -> List[Dict[str, Any]]:
+    findings: list[dict[str, Any]], min_severity: str
+) -> list[dict[str, Any]]:
     threshold = _SEVERITY_ORDER.get(min_severity, 4)
     return [
         f for f in findings
@@ -854,13 +853,13 @@ def filter_by_severity(
 # Report
 # ------------------------------------------------------------------ #
 
-def _finding_detail_cell(f: Dict[str, Any]) -> str:
+def _finding_detail_cell(f: dict[str, Any]) -> str:
     if f.get("merged"):
         detected_by = ", ".join(f.get("sources", []))
         sub = f.get("subdomain") or ""
-        cell = ["**Detectado por:** {}".format(detected_by)]
+        cell = [f"**Detectado por:** {detected_by}"]
         if sub:
-            cell.append("`{}`".format(sub))
+            cell.append(f"`{sub}`")
         for sd in f.get("sources_detail", []):
             s_src = sd.get("source", "unknown")
             if sd.get("raw"):
@@ -870,7 +869,7 @@ def _finding_detail_cell(f: Dict[str, Any]) -> str:
                 if sd.get("note"):
                     ev += " — {}".format(sd["note"])
             tag = "" if sd.get("confirmed", True) else " _(patrón sin confirmar)_"
-            cell.append("- `{}`: {}{}".format(s_src, ev, tag))
+            cell.append(f"- `{s_src}`: {ev}{tag}")
         return "<br>".join(cell)
 
     raw = f.get("raw") or ""
@@ -879,20 +878,20 @@ def _finding_detail_cell(f: Dict[str, Any]) -> str:
     sub   = f.get("subdomain") or ""
     cname = f.get("cname") or ""
     svc   = f.get("service") or ""
-    detail = "`{}` → `{}` ({})".format(sub, cname, svc)
+    detail = f"`{sub}` → `{cname}` ({svc})"
     if f.get("note"):
         detail += " — {}".format(f["note"])
     return detail
 
 
 def build_markdown_report(
-    report_path: Path, summary: Dict[str, Any], verbose: bool
+    report_path: Path, summary: dict[str, Any], verbose: bool
 ) -> None:
     now_utc = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    lines: List[str] = []
+    lines: list[str] = []
     lines.append("# Subdomain Takeover Report")
     lines.append("")
-    lines.append("> Generado: `{}` UTC  |  takeovflow v{}".format(now_utc, __version__))
+    lines.append(f"> Generado: `{now_utc}` UTC  |  takeovflow v{__version__}")
     lines.append("")
     lines.append("---")
     lines.append("")
@@ -915,18 +914,18 @@ def build_markdown_report(
         for f in d.get("potential_takeovers", [])
         if f.get("severity") == "HIGH"
     )
-    lines.append("| Subdominios descubiertos | **{}** |".format(total_subs))
-    lines.append("| Resueltos DNS | **{}** |".format(total_resolved))
-    lines.append("| Servicios HTTP | **{}** |".format(total_http))
-    lines.append("| Posibles takeovers | **{}** |".format(total_takeovers))
-    lines.append("| Severidad CRITICAL | **{}** |".format(critical_count))
-    lines.append("| Severidad HIGH | **{}** |".format(high_count))
+    lines.append(f"| Subdominios descubiertos | **{total_subs}** |")
+    lines.append(f"| Resueltos DNS | **{total_resolved}** |")
+    lines.append(f"| Servicios HTTP | **{total_http}** |")
+    lines.append(f"| Posibles takeovers | **{total_takeovers}** |")
+    lines.append(f"| Severidad CRITICAL | **{critical_count}** |")
+    lines.append(f"| Severidad HIGH | **{high_count}** |")
     lines.append("")
 
     for domain, data in summary["domains"].items():
         lines.append("---")
         lines.append("")
-        lines.append("## `{}`".format(domain))
+        lines.append(f"## `{domain}`")
         lines.append("")
         lines.append("| | |")
         lines.append("|--|--|")
@@ -952,7 +951,7 @@ def build_markdown_report(
                 detail = _finding_detail_cell(f)
                 if not confirmed:
                     detail = UNCONFIRMED_PREFIX + detail
-                lines.append("| {} {} | `{}` | {} |".format(emoji, sev, src, detail))
+                lines.append(f"| {emoji} {sev} | `{src}` | {detail} |")
             lines.append("")
 
         if data.get("httpx"):
@@ -969,14 +968,14 @@ def build_markdown_report(
             lines.append("")
             shown = data["subdomains"][:100]
             for s in shown:
-                lines.append("- `{}`".format(s))
+                lines.append(f"- `{s}`")
             if len(data["subdomains"]) > 100:
                 lines.append("- *... {} m\u00e1s*".format(len(data["subdomains"]) - 100))
             lines.append("")
 
     report_path.write_text("\n".join(lines), encoding="utf-8")
     if verbose:
-        log("[+] Informe Markdown: {}".format(report_path))
+        log(f"[+] Informe Markdown: {report_path}")
 
 
 # ------------------------------------------------------------------ #
@@ -1011,7 +1010,7 @@ def main() -> None:
 
     with tempfile.TemporaryDirectory(prefix="takeovflow_tmp_") as _tmpdir:
         tmpdir = Path(_tmpdir)
-        summary: Dict[str, Any] = {
+        summary: dict[str, Any] = {
             "tool": "takeovflow",
             "version": __version__,
             "started": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -1019,9 +1018,9 @@ def main() -> None:
         }
 
         for domain in domains:
-            log("\n[*] Analizando: {}".format(domain))
-            domain_data: Dict[str, Any] = {}
-            subs_file: Optional[Path] = None
+            log(f"\n[*] Analizando: {domain}")
+            domain_data: dict[str, Any] = {}
+            subs_file: Path | None = None
 
             if args.active_only:
                 src = args.subs_file or args.file
@@ -1056,8 +1055,8 @@ def main() -> None:
                 domain_data["resolved"] = resolved_info["resolved"]
                 domain_data["httpx"]    = resolved_info["httpx"]
 
-                log("[*] Buscando takeovers en {}...".format(domain))
-                takeovers: List[Dict[str, Any]] = []
+                log(f"[*] Buscando takeovers en {domain}...")
+                takeovers: list[dict[str, Any]] = []
                 takeovers += run_subjack(
                     domain, subs_file, tmpdir, args.verbose, available,
                     timeout=args.timeout * 4, retries=args.retries,
@@ -1085,26 +1084,26 @@ def main() -> None:
             summary["domains"][domain] = domain_data
 
         now = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M")
-        report_md   = output_dir / "takeovflow_report_{}.md".format(now)
-        report_json: Optional[Path] = None
+        report_md   = output_dir / f"takeovflow_report_{now}.md"
+        report_json: Path | None = None
 
         build_markdown_report(report_md, summary, verbose=args.verbose)
 
         if args.json_output:
-            report_json = output_dir / "takeovflow_report_{}.json".format(now)
+            report_json = output_dir / f"takeovflow_report_{now}.json"
             summary["finished"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
             report_json.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
             if args.verbose:
-                log("[+] Informe JSON: {}".format(report_json))
+                log(f"[+] Informe JSON: {report_json}")
 
         print("\n" + "=" * 60)
         print("[OK] An\u00e1lisis completado.")
-        print("     Markdown  : {}".format(report_md))
+        print(f"     Markdown  : {report_md}")
         if report_json:
-            print("     JSON      : {}".format(report_json))
+            print(f"     JSON      : {report_json}")
         total_findings = sum(len(d.get("potential_takeovers", [])) for d in summary["domains"].values())
         if total_findings:
-            print("     \u26a0\ufe0f  {} posible(s) takeover(s) encontrado(s)".format(total_findings))
+            print(f"     \u26a0\ufe0f  {total_findings} posible(s) takeover(s) encontrado(s)")
         else:
             print("     \u2705 Sin takeovers detectados")
         print("=" * 60)

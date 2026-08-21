@@ -1,0 +1,8 @@
+[lint]
+ignore = [
+    # Intentional fail-open architecture: missing/failing external tools
+    # (dnsx, httpx, subjack, nuclei, dig, network requests) must never abort
+    # the scan, so broad except blocks and silent continues are deliberate.
+    "BLE001",  # blind-except
+    "S112",    # try-except-continue
+]
