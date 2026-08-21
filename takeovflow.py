@@ -13,18 +13,23 @@ Flags de modo:
   --active-only           Solo fase activa; requiere --subs-file o --file
   --subs-file <path>      Archivo de subdominios para usar en fase activa
   --quiet                 Suprime banner y prints intermedios (ideal para wrappers/automatizacion)
+  --skip-http-verify      Desactiva la verificacion HTTP de firmas (S3/GitHub Pages/Heroku)
+                          sobre los hallazgos de cname-pattern (mas rapido, menos preciso)
 """
 
-__version__ = "1.5.1"
+__version__ = "1.6.0"
 
 import argparse
 import json
 import os
 import re
 import shutil
+import ssl
 import subprocess
 import sys
 import tempfile
+import urllib.error
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
@@ -120,6 +125,32 @@ CNAME_SERVICES: List[Tuple[str, str, str]] = [
     ("acquia-sites.com",        "Acquia",                      "HIGH"),
 ]
 
+# Verificacion HTTP activa minima (opcional, ver --skip-http-verify) para los
+# patrones CNAME mas frecuentes en bug bounty real. Firmas de error de
+# "recurso no encontrado" tomadas de EdOverflow/can-i-take-over-xyz
+# (fingerprints.json), la misma base que usa subjack. "edge_case": True marca
+# servicios donde la propia fuente no clasifica la firma como "Vulnerable"
+# puro (puede haber falsos positivos por protecciones anti-takeover del
+# proveedor) -- se confirma igual pero con nota explicita en el reporte.
+HTTP_VERIFY_SIGNATURES: Dict[str, Dict[str, Any]] = {
+    "amazonaws.com": {
+        "signature": "The specified bucket does not exist",
+        "edge_case": False,
+    },
+    "github.io": {
+        "signature": "There isn't a GitHub Pages site here.",
+        "edge_case": True,
+    },
+    "herokuapp.com": {
+        "signature": "No such app",
+        "edge_case": True,
+    },
+    "herokudns.com": {
+        "signature": "No such app",
+        "edge_case": True,
+    },
+}
+
 SEVERITY_COLOR = {
     "CRITICAL": "\U0001f6a8",
     "HIGH":     "\U0001f534",
@@ -129,6 +160,14 @@ SEVERITY_COLOR = {
 }
 
 _SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
+
+# cname-pattern findings sin verificacion adicional se degradan un escalon:
+# la coincidencia de patron por si sola no confirma que el recurso remoto
+# este realmente huerfano/reclamable (a diferencia de subjack/nuclei, que
+# verifican por firma).
+_UNCONFIRMED_DOWNGRADE = {"HIGH": "MEDIUM", "MEDIUM": "LOW", "LOW": "LOW"}
+
+UNCONFIRMED_PREFIX = "[PATRÓN SIN CONFIRMAR — requiere verificación manual] "
 
 
 # ------------------------------------------------------------------ #
@@ -269,6 +308,12 @@ def parse_args() -> argparse.Namespace:
     scan.add_argument("--nuclei-templates", help="Ruta a templates personalizados de nuclei")
     scan.add_argument("--min-severity",   choices=["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"],
                       default="INFO",      help="Filtro m\u00ednimo de severidad en reporte (default: INFO)")
+    scan.add_argument(
+        "--skip-http-verify", action="store_true",
+        help="Desactiva la verificacion HTTP activa de firmas (S3/GitHub Pages/Heroku) "
+             "sobre los hallazgos de cname-pattern. Mas rapido, pero esos hallazgos se "
+             "quedan como 'patron sin confirmar' salvo que otra fuente los corrobore.",
+    )
     parser.add_argument(
         "--version", action="version",
         version="takeovflow {}".format(__version__),
@@ -541,10 +586,66 @@ def run_nuclei(
     return findings
 
 
+def _fetch_body_for_verify(sub: str, timeout: int) -> Optional[str]:
+    """GET simple a http(s)://sub para verificacion de firma. Prueba https y
+    luego http; certificados invalidos se ignoran (frecuentes en recursos
+    huerfanos). Devuelve None ante cualquier fallo (timeout, DNS, conexion).
+    """
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    headers = {"User-Agent": "takeovflow/{}".format(__version__)}
+    for scheme in ("https", "http"):
+        url = "{}://{}".format(scheme, sub)
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+                return resp.read(65536).decode(errors="ignore")
+        except urllib.error.HTTPError as exc:
+            # Los mensajes de "recurso no encontrado" (NoSuchBucket, 404 de
+            # GitHub Pages/Heroku, etc.) casi siempre vienen en una respuesta
+            # de error (4xx), que urlopen levanta como excepcion en vez de
+            # devolverla como respuesta normal. El body sigue siendo legible.
+            try:
+                return exc.read(65536).decode(errors="ignore")
+            except Exception:
+                continue
+        except Exception:
+            continue
+    return None
+
+
+def _http_verify_cname(sub: str, cname: str, timeout: int) -> Optional[Dict[str, Any]]:
+    """Verificacion HTTP minima para los patrones CNAME mas comunes (ver
+    HTTP_VERIFY_SIGNATURES). Si la firma de "recurso no encontrado" del
+    proveedor aparece en la respuesta, devuelve confirmacion; si no aplica o
+    no se puede verificar, devuelve None y el finding se queda como patron
+    sin confirmar.
+    """
+    sig_entry = None
+    for pattern, info in HTTP_VERIFY_SIGNATURES.items():
+        if pattern in cname:
+            sig_entry = info
+            break
+    if not sig_entry:
+        return None
+
+    body = _fetch_body_for_verify(sub, timeout)
+    if body is None or sig_entry["signature"] not in body:
+        return None
+
+    note = "Firma HTTP confirmada: \"{}\"".format(sig_entry["signature"])
+    if sig_entry["edge_case"]:
+        note += " (firma edge-case: puede requerir verificación adicional)"
+    return {"confirmed": True, "note": note}
+
+
 def _check_cname_single(
     sub: str,
     verbose: bool,
     timeout: int = 10,
+    http_verify: bool = True,
+    http_verify_timeout: int = 8,
 ) -> Optional[Dict[str, Any]]:
     try:
         result = subprocess.run(
@@ -559,13 +660,23 @@ def _check_cname_single(
         return None
     for pattern, service, severity in CNAME_SERVICES:
         if pattern in cname:
-            return {
+            # Coincidencia de patron sin verificacion adicional: severidad
+            # degradada y marcada explicitamente como no confirmada.
+            finding = {
                 "source": "cname-pattern",
                 "subdomain": sub,
                 "cname": cname,
                 "service": service,
-                "severity": severity,
+                "severity": _UNCONFIRMED_DOWNGRADE.get(severity, severity),
+                "confirmed": False,
             }
+            if http_verify:
+                verified = _http_verify_cname(sub, cname, http_verify_timeout)
+                if verified:
+                    finding["severity"] = severity  # severidad completa original
+                    finding["confirmed"] = True
+                    finding["note"] = verified["note"]
+            return finding
     return None
 
 
@@ -574,6 +685,8 @@ def analyze_cname_patterns(
     verbose: bool, available: Set[str],
     threads: int = 50,
     dig_timeout: int = 10,
+    http_verify: bool = True,
+    http_verify_timeout: int = 8,
 ) -> List[Dict[str, Any]]:
     if "dig" not in available:
         if verbose:
@@ -591,14 +704,20 @@ def analyze_cname_patterns(
 
     with ThreadPoolExecutor(max_workers=threads) as executor:
         futures = {
-            executor.submit(_check_cname_single, sub, verbose, dig_timeout): sub
+            executor.submit(
+                _check_cname_single, sub, verbose, dig_timeout,
+                http_verify, http_verify_timeout,
+            ): sub
             for sub in subdomains
         }
         for future in as_completed(futures):
             result = future.result()
             if result:
                 findings.append(result)
-                line = "{} -> {} [{}]".format(result["subdomain"], result["cname"], result["service"])
+                tag = " [CONFIRMADO]" if result.get("confirmed") else " [sin confirmar]"
+                line = "{} -> {} [{}]{}".format(
+                    result["subdomain"], result["cname"], result["service"], tag
+                )
                 suspicious_lines.append(line)
                 log("  {} [cname] {}".format(
                     SEVERITY_COLOR.get(result["severity"], "\u26aa"), line
@@ -611,18 +730,114 @@ def analyze_cname_patterns(
     return findings
 
 
+_URL_HOST_RE = re.compile(r"https?://([^\s/\\]+)", re.I)
+_BARE_HOST_RE = re.compile(r"\b((?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,62})?\.)+[a-zA-Z]{2,63})\b")
+
+# fuentes que verifican el takeover por firma/fingerprint real, no solo por
+# coincidencia de patron en el CNAME.
+_STRONG_SOURCES = {"subjack", "nuclei"}
+
+
+def _extract_subdomain_from_raw(raw: str) -> str:
+    """Intenta sacar el host/subdominio de una linea 'raw' de subjack/nuclei.
+    Prioriza una URL http(s) embebida; si no hay, busca un hostname suelto.
+    """
+    if not raw:
+        return ""
+    m = _URL_HOST_RE.search(raw)
+    if m:
+        return m.group(1).split(":")[0].strip().lower()
+    m = _BARE_HOST_RE.search(raw)
+    if m:
+        return m.group(1).strip().lower()
+    parts = raw.split()
+    return parts[0].strip().lower() if parts else ""
+
+
+def _finding_subdomain(f: Dict[str, Any]) -> str:
+    sub = f.get("subdomain")
+    if sub:
+        return sub.strip().lower()
+    return _extract_subdomain_from_raw(f.get("raw", ""))
+
+
+def _service_base_severity(service: str) -> Optional[str]:
+    """Severidad original (sin degradar) que CNAME_SERVICES asigna a un servicio."""
+    for _pattern, svc, severity in CNAME_SERVICES:
+        if svc == service:
+            return severity
+    return None
+
+
+def _merge_findings(items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Fusiona findings del mismo subdominio detectados por fuentes distintas.
+
+    Si al menos una fuente fuerte (subjack/nuclei, verificacion real por firma)
+    participa, el finding fusionado se marca confirmed=True y recupera la
+    severidad original (sin el degradado de 'patron sin confirmar') para
+    cualquier componente cname-pattern. Conserva el detalle de cada fuente
+    individual en 'sources_detail' para no perder evidencia al fusionar.
+    """
+    sources: List[str] = []
+    for it in items:
+        s = it.get("source", "unknown")
+        if s not in sources:
+            sources.append(s)
+
+    confirmed = any(it.get("confirmed", True) for it in items) or any(
+        s in _STRONG_SOURCES for s in sources
+    )
+
+    candidate_severities: List[str] = []
+    for it in items:
+        sev = it.get("severity", "INFO")
+        if confirmed and it.get("source") == "cname-pattern" and not it.get("confirmed", True):
+            base = _service_base_severity(it.get("service", ""))
+            if base:
+                sev = base
+        candidate_severities.append(sev)
+    severity = min(candidate_severities, key=lambda s: _SEVERITY_ORDER.get(s, 4))
+
+    subdomain = ""
+    for it in items:
+        subdomain = _finding_subdomain(it)
+        if subdomain:
+            break
+
+    return {
+        "source": ", ".join(sources),
+        "sources": sources,
+        "subdomain": subdomain,
+        "severity": severity,
+        "confirmed": confirmed,
+        "merged": True,
+        "sources_detail": items,
+    }
+
+
 def deduplicate_takeovers(findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    # Paso 1: elimina duplicados exactos de la misma fuente+subdominio.
     seen: Set[str] = set()
-    unique: List[Dict[str, Any]] = []
+    dedup_by_source: List[Dict[str, Any]] = []
     for f in findings:
-        sub = f.get("subdomain") or ""
-        if not sub and f.get("raw"):
-            sub = f["raw"].split()[0]
+        sub = _finding_subdomain(f)
         key = "{}:{}".format(f.get("source", ""), sub)
         if key not in seen:
             seen.add(key)
-            unique.append(f)
-    return unique
+            dedup_by_source.append(f)
+
+    # Paso 2: agrupa por subdominio, fusionando findings de fuentes distintas
+    # que apuntan al mismo subdominio y subiendo la confianza cuando coinciden.
+    groups: Dict[str, List[Dict[str, Any]]] = {}
+    for f in dedup_by_source:
+        sub = _finding_subdomain(f)
+        key = sub if sub else "__nosub__:{}".format(id(f))
+        groups.setdefault(key, []).append(f)
+
+    merged: List[Dict[str, Any]] = []
+    for items in groups.values():
+        merged.append(items[0] if len(items) == 1 else _merge_findings(items))
+    return merged
 
 
 def filter_by_severity(
@@ -638,6 +853,37 @@ def filter_by_severity(
 # ------------------------------------------------------------------ #
 # Report
 # ------------------------------------------------------------------ #
+
+def _finding_detail_cell(f: Dict[str, Any]) -> str:
+    if f.get("merged"):
+        detected_by = ", ".join(f.get("sources", []))
+        sub = f.get("subdomain") or ""
+        cell = ["**Detectado por:** {}".format(detected_by)]
+        if sub:
+            cell.append("`{}`".format(sub))
+        for sd in f.get("sources_detail", []):
+            s_src = sd.get("source", "unknown")
+            if sd.get("raw"):
+                ev = sd["raw"].replace("|", "\\|")
+            else:
+                ev = "→ `{}` ({})".format(sd.get("cname", ""), sd.get("service", ""))
+                if sd.get("note"):
+                    ev += " — {}".format(sd["note"])
+            tag = "" if sd.get("confirmed", True) else " _(patrón sin confirmar)_"
+            cell.append("- `{}`: {}{}".format(s_src, ev, tag))
+        return "<br>".join(cell)
+
+    raw = f.get("raw") or ""
+    if raw:
+        return raw.replace("|", "\\|")
+    sub   = f.get("subdomain") or ""
+    cname = f.get("cname") or ""
+    svc   = f.get("service") or ""
+    detail = "`{}` → `{}` ({})".format(sub, cname, svc)
+    if f.get("note"):
+        detail += " — {}".format(f["note"])
+    return detail
+
 
 def build_markdown_report(
     report_path: Path, summary: Dict[str, Any], verbose: bool
@@ -699,17 +945,13 @@ def build_markdown_report(
                 data["potential_takeovers"],
                 key=lambda x: _SEVERITY_ORDER.get(x.get("severity", "INFO"), 4),
             ):
-                sev   = f.get("severity", "INFO")
-                src   = f.get("source", "unknown")
-                raw   = f.get("raw") or ""
-                sub   = f.get("subdomain") or ""
-                cname = f.get("cname") or ""
-                svc   = f.get("service") or ""
+                sev       = f.get("severity", "INFO")
+                src       = f.get("source", "unknown")
+                confirmed = f.get("confirmed", True)
                 emoji = SEVERITY_COLOR.get(sev, "\u26aa")
-                if raw:
-                    detail = raw.replace("|", "\\|")
-                else:
-                    detail = "`{}` \u2192 `{}` ({})".format(sub, cname, svc)
+                detail = _finding_detail_cell(f)
+                if not confirmed:
+                    detail = UNCONFIRMED_PREFIX + detail
                 lines.append("| {} {} | `{}` | {} |".format(emoji, sev, src, detail))
             lines.append("")
 
@@ -829,6 +1071,7 @@ def main() -> None:
                     domain, subs_file, tmpdir, args.verbose, available,
                     threads=args.threads,
                     dig_timeout=args.timeout,
+                    http_verify=not args.skip_http_verify,
                 )
 
                 takeovers = deduplicate_takeovers(takeovers)
